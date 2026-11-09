@@ -19,8 +19,8 @@ Estimates are rough working hours for one person, including tests and docs.
 ## v0.2 - better link checking (about 7 h)
 
 - [ ] Verify `#Heading` and `#^block` anchors, not just target files (3 h)
-- [ ] `backlinks NOTE`: list notes linking to a note, with line numbers (2 h)
-- [ ] `orphans`: notes that nothing links to (1 h)
+- [x] `backlinks NOTE`: list notes linking to a note, with line numbers (2 h)
+- [x] `orphans`: notes that nothing links to (1 h)
 - [ ] Reference-style Markdown links (`[text][ref]` + `[ref]: path`) (1 h)
 
 ## v0.3 - search quality (about 8 h)

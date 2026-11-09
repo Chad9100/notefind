@@ -3,13 +3,15 @@
 Search and check a folder of Markdown notes from the command line.
 
 `notefind` works on the kind of notes folder people keep in Obsidian, Logseq or
-plain directories. It does three things:
+plain directories. It does these things:
 
 - **search**: case-insensitive full-text search with AND-ed terms, `"phrases"`,
   `-exclusions` and `tag:` filters, ranked by number of matches, with the
   matching line shown and highlighted;
 - **tags**: list every tag (front matter and inline `#tags`) with note counts;
-- **links**: find broken `[[wiki links]]` and relative `[markdown](links.md)`.
+- **links**: find broken `[[wiki links]]` and relative `[markdown](links.md)`;
+- **backlinks**: list the notes that link to a given note;
+- **orphans**: list notes that nothing links to.
 
 There is no index and no database. Every run scans the folder, skipping hidden
 directories (`.git`, `.obsidian`, `.trash`, ...) and `node_modules`.
@@ -207,6 +209,36 @@ $ notefind links --json
   ]
 }
 ```
+
+### backlinks
+
+```console
+$ notefind backlinks "Garden Plan"
+Seed Order.md:12: -> Garden Plan
+projects/Reading List.md:6: -> Garden Plan
+2 links from 2 notes to Garden Plan.md
+```
+
+`NOTE` can be a note name (`"Garden Plan"`), a file name (`"Garden Plan.md"`) or
+a path (`projects/watering`), matched case-insensitively. Both wiki links
+(including aliases and `#heading` links) and relative Markdown links count; a
+note linking to itself does not. If a name matches notes in several folders,
+`backlinks` lists them and asks for a path instead (exit code 2). It exits with
+1 when nothing links to the note. `--json` prints
+`{"note": ..., "backlinks": [{"path", "line", "kind", "link"}, ...]}`.
+
+### orphans
+
+```console
+$ notefind orphans
+daily/2026-05-02.md
+projects/Reading List.md
+2 of 6 notes have no links pointing to them
+```
+
+Notes that no *other* note links to: useful for spotting forgotten notes. It
+always exits with 0, since an orphan isn't an error (daily notes and index pages
+are often orphans on purpose). `--json` prints `{"total_notes": 6, "orphans": [...]}`.
 
 ### Files
 

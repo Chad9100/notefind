@@ -1,4 +1,4 @@
-"""Command-line interface: notefind search | tags | links."""
+"""Command-line interface: notefind search | tags | links | backlinks | orphans."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Sequence, TextIO
 
 from . import __version__
+from .graph import NoteResolver, backlinks, link_edges, orphans
 from .linkcheck import find_broken_links
 from .parse import extract_tags
 from .scan import load_notes, walk_files
@@ -100,6 +101,27 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("links", help="report broken wiki and Markdown links")
     _add_folder(p)
     p.add_argument("--json", action="store_true", help="print JSON")
+
+    p = sub.add_parser(
+        "backlinks",
+        help="list notes that link to a note",
+        description=(
+            'Notes that link to NOTE, with line numbers. NOTE is a note name '
+            '("Garden Plan"), a file name ("Garden Plan.md") or a path '
+            '("projects/watering"), matched case-insensitively.'
+        ),
+    )
+    p.add_argument("note", metavar="NOTE", help="the note to find links to")
+    _add_folder(p)
+    p.add_argument("--json", action="store_true", help="print JSON")
+
+    p = sub.add_parser(
+        "orphans",
+        help="list notes that no other note links to",
+        description="Notes that no other note links to. A link to itself doesn't count.",
+    )
+    _add_folder(p)
+    p.add_argument("--json", action="store_true", help="print JSON")
     return parser
 
 
@@ -180,6 +202,58 @@ def _cmd_links(args: argparse.Namespace, root: Path) -> int:
     return 1 if broken else 0
 
 
+def _cmd_backlinks(args: argparse.Namespace, root: Path) -> int:
+    notes = load_notes(root)
+    matches = NoteResolver(notes).by_name(args.note)
+    if not matches:
+        print(f"notefind: no note named {args.note!r}", file=sys.stderr)
+        return 2
+    if len(matches) > 1:
+        print(f"notefind: {args.note!r} matches {len(matches)} notes; "
+              "give its path instead:", file=sys.stderr)
+        for rel in matches:
+            print(f"  {rel}", file=sys.stderr)
+        return 2
+    [target] = matches
+    found = backlinks(link_edges(notes), target)
+    if args.json:
+        payload = {
+            "note": target,
+            "backlinks": [
+                {"path": e.source, "line": e.line, "kind": e.kind, "link": e.written}
+                for e in found
+            ],
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+    else:
+        for e in found:
+            print(f"{e.source}:{e.line}: -> {e.written}")
+        sys.stdout.flush()
+        sources = len({e.source for e in found})
+        if found:
+            links = "link" if len(found) == 1 else "links"
+            note = "note" if sources == 1 else "notes"
+            print(f"{len(found)} {links} from {sources} {note} to {target}", file=sys.stderr)
+        else:
+            print(f"nothing links to {target}", file=sys.stderr)
+    return 0 if found else 1
+
+
+def _cmd_orphans(args: argparse.Namespace, root: Path) -> int:
+    notes = load_notes(root)
+    lonely = orphans(notes, link_edges(notes))
+    if args.json:
+        print(json.dumps({"total_notes": len(notes), "orphans": lonely},
+                         indent=2, ensure_ascii=False))
+    else:
+        for rel in lonely:
+            print(rel)
+        sys.stdout.flush()
+        print(f"{len(lonely)} of {len(notes)} notes have no links pointing to them",
+              file=sys.stderr)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -199,4 +273,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_search(args, root)
     if args.command == "tags":
         return _cmd_tags(args, root)
+    if args.command == "backlinks":
+        return _cmd_backlinks(args, root)
+    if args.command == "orphans":
+        return _cmd_orphans(args, root)
     return _cmd_links(args, root)
