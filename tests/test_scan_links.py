@@ -41,7 +41,7 @@ def test_invalid_utf8_is_replaced_not_fatal(make_vault):
 def test_wiki_links_resolve_by_stem_anywhere_case_insensitive(make_vault):
     root = make_vault({
         "index.md": "[[deep note]] [[Deep Note|alias]] [[DEEP NOTE#Heading]] [[Missing]]\n",
-        "a/b/Deep Note.md": "x",
+        "a/b/Deep Note.md": "# Heading\n",
     })
     assert broken(root) == ([("index.md", 1, "Missing")], 4)
 
@@ -55,9 +55,16 @@ def test_wiki_link_with_folder_path_and_attachment(make_vault):
     assert broken(root)[0] == [("index.md", 3, "x/Note")]
 
 
-def test_self_heading_links_are_not_checked(make_vault):
+def test_self_heading_links_are_checked_against_the_same_note(make_vault):
+    root = make_vault({"a.md": "# Intro\n[[#Intro]] [jump](#intro) [[#Outro]] [x](#)\n"})
+    assert broken(root) == ([("a.md", 2, "#Outro")], 3)
+
+
+def test_self_heading_links_are_skipped_without_anchor_checks(make_vault):
     root = make_vault({"a.md": "[[#Intro]] [jump](#intro)\n"})
-    assert broken(root) == ([], 0)
+    files = walk_files(root)
+    notes = load_notes(root, files)
+    assert find_broken_links(root, notes, files, check_anchors=False) == ([], 0)
 
 
 def test_markdown_links_relative_to_linking_file(make_vault):
@@ -65,7 +72,7 @@ def test_markdown_links_relative_to_linking_file(make_vault):
         "sub/a.md": "[ok](other.md) [up](../top.md#x) [bad](top.md) [enc](my%20note.md)\n",
         "sub/other.md": "x",
         "sub/my note.md": "x",
-        "top.md": "x",
+        "top.md": "# X\n",
     })
     assert broken(root) == ([("sub/a.md", 1, "top.md")], 4)
 
@@ -105,6 +112,6 @@ def test_reference_style_links_are_checked_where_used(make_vault):
             "[web]: https://example.com/\n"
         ),
         "sub/other.md": "x",
-        "top.md": "x",
+        "top.md": "Intro\n=====\n",
     })
     assert broken(root) == ([("sub/a.md", 3, "nope.md")], 3)

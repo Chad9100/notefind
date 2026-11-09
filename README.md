@@ -9,7 +9,8 @@ plain directories. It does these things:
   `-exclusions` and `tag:` filters, ranked by number of matches, with the
   matching line shown and highlighted;
 - **tags**: list every tag (front matter and inline `#tags`) with note counts;
-- **links**: find broken `[[wiki links]]` and relative `[markdown](links.md)`;
+- **links**: find broken `[[wiki links]]` and relative `[markdown](links.md)`,
+  including `#Heading` and `#^block` anchors that don't exist;
 - **backlinks**: list the notes that link to a given note;
 - **orphans**: list notes that nothing links to.
 
@@ -172,15 +173,15 @@ $ notefind links
 daily/2026-05-02.md:7: broken link -> ../projects/pruning.md
 projects/Reading List.md:10: broken link -> Pruning
 projects/watering.md:6: broken link -> ../manuals/timer.md
-3 broken (10 links checked in 6 notes)
+projects/watering.md:7: broken link -> Garden Plan#Beds (no heading "Beds" in Garden Plan.md)
+4 broken (12 links checked in 6 notes)
 $ echo $?
 1
 ```
 
 - `[[Wiki Link]]`, `[[Wiki Link|alias]]`, `[[Note#Heading]]` and `![[embeds]]`
   resolve by file name, case-insensitively, anywhere in the folder.
-  `[[folder/Note]]` must match the end of a path. `[[#Heading]]` is a link
-  into the same note and is not checked.
+  `[[folder/Note]]` must match the end of a path.
 - `[text](other.md)`, `[text](sub/other.md#anchor)` and images resolve
   relative to the linking note (a leading `/` means the notes folder).
   `%20` escapes and `<angle brackets>` are handled.
@@ -190,38 +191,79 @@ $ echo $?
   match case-insensitively; the first definition wins. A reference with no
   definition is plain text (as in CommonMark), and `[^1]:` footnotes are not
   links.
-- `http(s)://`, `mailto:` and other URLs, and pure `#anchors`, are skipped.
+- `http(s)://`, `mailto:` and other URLs are skipped.
 - Links inside code blocks and inline code are ignored.
 
-Headings and anchors themselves are not verified yet, only the target file.
+Anchors are checked too, when the link points to a note:
+
+- `[[Note#Heading]]` needs a heading with that text in `Note`, compared
+  ignoring case, punctuation and spacing (so `[[Plan#Tasks urgent]]` matches
+  `## Tasks: urgent!`). `[[Note#Parent#Child]]` needs both headings.
+- `[[Note#^block-id]]` needs a line ending in `^block-id` in `Note`.
+- `[text](note.md#some-heading)` accepts GitHub-style slugs (`#notes-1` for
+  the second `## Notes`), Obsidian-style `#Some%20Heading`, `#^block-id` and
+  `<a id="...">` anchors.
+- `[[#Heading]]` and `[text](#heading)` are checked against the note they are
+  in.
+- ATX (`# Heading`) and setext (`Heading` + `===`) headings count; headings
+  in code blocks and front matter don't.
+- Anchors on other files, such as `manual.pdf#page=3`, are not checked.
+
+`examples/notes` has one of each kind that works (`[[Compost#Ratios]]`,
+`[[2026-05-02#^frost]]`, `projects/watering.md#watering-schedule`) and one
+that doesn't (`[[Garden Plan#Beds]]`). Use `--no-anchors` to check only that
+targets exist:
+
+```console
+$ notefind links --no-anchors
+daily/2026-05-02.md:7: broken link -> ../projects/pruning.md
+projects/Reading List.md:10: broken link -> Pruning
+projects/watering.md:6: broken link -> ../manuals/timer.md
+3 broken (12 links checked in 6 notes)
+```
+
 Exit code is 1 if any link is broken, 0 otherwise, so it can gate a CI job.
 
 ```console
 $ notefind links --json
 {
-  "checked": 10,
+  "checked": 12,
   "broken": [
     {
       "path": "daily/2026-05-02.md",
       "line": 7,
       "kind": "markdown",
-      "target": "../projects/pruning.md"
+      "target": "../projects/pruning.md",
+      "reason": "no-file"
     },
     {
       "path": "projects/Reading List.md",
       "line": 10,
       "kind": "wiki",
-      "target": "Pruning"
+      "target": "Pruning",
+      "reason": "no-file"
     },
     {
       "path": "projects/watering.md",
       "line": 6,
       "kind": "markdown",
-      "target": "../manuals/timer.md"
+      "target": "../manuals/timer.md",
+      "reason": "no-file"
+    },
+    {
+      "path": "projects/watering.md",
+      "line": 7,
+      "kind": "wiki",
+      "target": "Garden Plan#Beds",
+      "reason": "no-heading",
+      "detail": "no heading \"Beds\" in Garden Plan.md"
     }
   ]
 }
 ```
+
+`reason` is `no-file`, `no-heading` or `no-block`; `detail` is only there for
+missing anchors.
 
 ### backlinks
 
@@ -229,7 +271,8 @@ $ notefind links --json
 $ notefind backlinks "Garden Plan"
 Seed Order.md:12: -> Garden Plan
 projects/Reading List.md:6: -> Garden Plan
-2 links from 2 notes to Garden Plan.md
+projects/watering.md:7: -> Garden Plan#Beds
+3 links from 3 notes to Garden Plan.md
 ```
 
 `NOTE` can be a note name (`"Garden Plan"`), a file name (`"Garden Plan.md"`) or
@@ -244,9 +287,8 @@ notes in several folders, `backlinks` lists them and asks for a path instead
 
 ```console
 $ notefind orphans
-daily/2026-05-02.md
 projects/Reading List.md
-2 of 6 notes have no links pointing to them
+1 of 6 notes have no links pointing to them
 ```
 
 Notes that no *other* note links to: useful for spotting forgotten notes. It
@@ -278,7 +320,10 @@ src/notefind/
   scan.py       walk the folder, read notes (BOM/CRLF handling)
   parse.py      code stripping, front matter, tags, link extraction
   search.py     query parsing, matching, ranking, snippets, highlighting
-  linkcheck.py  resolving wiki and Markdown links
+  resolve.py    mapping link targets and note names to notes
+  anchors.py    headings, slugs and block IDs for #anchor checks
+  linkcheck.py  resolving wiki and Markdown links and their anchors
+  graph.py      backlinks and orphans
   cli.py        argparse front end
 tests/          pytest suite using throwaway tmp_path note folders
 examples/notes  made-up notes used in this README

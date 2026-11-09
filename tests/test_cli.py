@@ -135,7 +135,32 @@ def test_links_json_shape(vault, capsys):
     _, out, _ = run(capsys, "links", "-C", str(vault), "--json")
     data = json.loads(out)
     assert data["checked"] == 4
-    assert data["broken"][1] == {"path": "ideas/todo.md", "line": 2, "kind": "wiki", "target": "Soup"}
+    assert data["broken"][1] == {
+        "path": "ideas/todo.md", "line": 2, "kind": "wiki", "target": "Soup", "reason": "no-file",
+    }
+
+
+def test_links_reports_missing_anchors_with_detail(make_vault, capsys):
+    root = make_vault({
+        "a.md": "[[B#Setup]] [[B#Usage]] [b](B.md#^gone)\n",
+        "B.md": "# Setup\nA paragraph. ^kept\n",
+    })
+    code, out, err = run(capsys, "links", "-C", str(root))
+    assert code == 1
+    assert out.splitlines() == [
+        'a.md:1: broken link -> B#Usage (no heading "Usage" in B.md)',
+        'a.md:1: broken link -> B.md#^gone (no block "^gone" in B.md)',
+    ]
+    assert "2 broken (3 links checked in 2 notes)" in err
+
+    _, out, _ = run(capsys, "links", "-C", str(root), "--json")
+    assert [(b["reason"], b["detail"]) for b in json.loads(out)["broken"]] == [
+        ("no-heading", 'no heading "Usage" in B.md'),
+        ("no-block", 'no block "^gone" in B.md'),
+    ]
+
+    code, out, err = run(capsys, "links", "-C", str(root), "--no-anchors")
+    assert code == 0 and out == "" and "3 links checked" in err
 
 
 # --- misc -----------------------------------------------------------------

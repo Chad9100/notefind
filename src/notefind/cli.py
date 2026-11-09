@@ -98,9 +98,20 @@ def build_parser() -> argparse.ArgumentParser:
     _add_folder(p)
     p.add_argument("--json", action="store_true", help="print JSON")
 
-    p = sub.add_parser("links", help="report broken wiki and Markdown links")
+    p = sub.add_parser(
+        "links",
+        help="report broken wiki and Markdown links",
+        description=(
+            "Report links whose target note or file doesn't exist, and links "
+            "whose #Heading or #^block anchor isn't in the target note."
+        ),
+    )
     _add_folder(p)
     p.add_argument("--json", action="store_true", help="print JSON")
+    p.add_argument(
+        "--no-anchors", action="store_true",
+        help="only check that targets exist, not their #headings and #^blocks",
+    )
 
     p = sub.add_parser(
         "backlinks",
@@ -183,19 +194,21 @@ def _cmd_tags(args: argparse.Namespace, root: Path) -> int:
 def _cmd_links(args: argparse.Namespace, root: Path) -> int:
     files = walk_files(root)
     notes = load_notes(root, files)
-    broken, checked = find_broken_links(root, notes, files)
+    broken, checked = find_broken_links(root, notes, files, check_anchors=not args.no_anchors)
     if args.json:
         payload = {
             "checked": checked,
             "broken": [
-                {"path": b.path, "line": b.line, "kind": b.kind, "target": b.target}
+                {"path": b.path, "line": b.line, "kind": b.kind, "target": b.target,
+                 "reason": b.reason, **({"detail": b.detail} if b.detail else {})}
                 for b in broken
             ],
         }
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         for b in broken:
-            print(f"{b.path}:{b.line}: broken link -> {b.target}")
+            detail = f" ({b.detail})" if b.detail else ""
+            print(f"{b.path}:{b.line}: broken link -> {b.target}{detail}")
         sys.stdout.flush()
         summary = f"{len(broken)} broken" if broken else "no broken links"
         print(f"{summary} ({checked} links checked in {len(notes)} notes)", file=sys.stderr)
