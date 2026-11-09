@@ -90,3 +90,21 @@ def test_links_to_notes_in_hidden_dirs_do_not_resolve(make_vault):
 def test_crlf_note_reports_correct_line(make_vault):
     root = make_vault({"a.md": b"one\r\ntwo\r\n[[Gone]]\r\n"})
     assert broken(root)[0] == [("a.md", 3, "Gone")]
+
+
+def test_reference_style_links_are_checked_where_used(make_vault):
+    root = make_vault({
+        "sub/a.md": (
+            "Read [the other note][other] and [top][].\n"
+            "\n"
+            "Also [gone][missing-file] and [ext][web].\n"
+            "\n"
+            "[other]: other.md\n"
+            "[top]: ../top.md#intro\n"
+            "[missing-file]: nope.md\n"
+            "[web]: https://example.com/\n"
+        ),
+        "sub/other.md": "x",
+        "top.md": "x",
+    })
+    assert broken(root) == ([("sub/a.md", 3, "nope.md")], 3)

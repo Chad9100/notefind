@@ -137,3 +137,16 @@ def test_cli_orphans_json(vault, capsys):
     assert main(["orphans", "-C", str(vault), "--json"]) == 0
     assert json.loads(capsys.readouterr().out) == {
         "total_notes": 5, "orphans": ["daily/2026-05-02.md", "projects/watering.md"]}
+
+
+def test_reference_style_links_count_as_backlinks(make_vault):
+    root = make_vault({
+        "index.md": "Start with [the plan][p].\n\n[p]: projects/Plan.md\n",
+        "projects/Plan.md": "x",
+    })
+    notes = load_notes(root)
+    edges = link_edges(notes)
+    assert [(e.source, e.line, e.target, e.kind) for e in backlinks(edges, "projects/Plan.md")] == [
+        ("index.md", 1, "projects/Plan.md", "markdown")
+    ]
+    assert orphans(notes, edges) == ["index.md"]

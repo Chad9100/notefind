@@ -127,3 +127,63 @@ def test_links_in_code_are_ignored():
 
 def test_escaped_alias_in_table():
     assert extract_links("| [[Note\\|alias]] |\n") == [Link(1, "Note", "wiki")]
+
+
+# --- reference-style links ------------------------------------------------
+
+def test_reference_links_full_collapsed_and_shortcut():
+    text = (
+        "See [the plan][plan], the [Compost][] note and [Seeds].\n"
+        "\n"
+        "[plan]: Garden%20Plan.md\n"
+        "[compost]: <sub/Compost.md> \"Title\"\n"
+        "  [SEEDS]:   seeds.md 'Seed order'\n"
+    )
+    assert extract_links(text) == [
+        Link(1, "Garden%20Plan.md", "markdown"),
+        Link(1, "sub/Compost.md", "markdown"),
+        Link(1, "seeds.md", "markdown"),
+    ]
+
+
+def test_reference_labels_ignore_case_and_whitespace_first_definition_wins():
+    text = "[a][My   Ref] and [b][my ref]\n[my ref]: first.md\n[MY REF]: second.md\n"
+    assert extract_links(text) == [
+        Link(1, "first.md", "markdown"),
+        Link(1, "first.md", "markdown"),
+    ]
+
+
+def test_undefined_references_unused_definitions_and_footnotes_are_not_links():
+    text = (
+        "- [x] done task\n"
+        "Text with [brackets] and [a][missing] and a note[^1].\n"
+        "[unused]: nowhere.md\n"
+        "[^1]: a footnote, not a link\n"
+    )
+    assert extract_links(text) == []
+
+
+def test_reference_links_and_definitions_in_code_are_ignored():
+    text = (
+        "`[x][ref]` and\n"
+        "```\n"
+        "[y][ref]\n"
+        "[code]: code.md\n"
+        "```\n"
+        "[z][code] [w][ref]\n"
+        "[ref]: real.md\n"
+    )
+    assert extract_links(text) == [Link(6, "real.md", "markdown")]
+
+
+def test_inline_link_is_not_mistaken_for_a_reference():
+    text = "[ref](inline.md) [[ref]]\n[ref]: defined.md\n"
+    assert extract_links(text) == [
+        Link(1, "ref", "wiki"),
+        Link(1, "inline.md", "markdown"),
+    ]
+
+
+def test_reference_definition_anchor_is_not_a_tag():
+    assert extract_tags("[jump]: #section\nreal #tag\n") == {"tag"}

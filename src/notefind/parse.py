@@ -21,6 +21,14 @@ MD_LINK_RE = re.compile(
     r"\[[^\[\]\n]*\]\(\s*(<[^>\n]*>|[^()\s]*(?:\([^()\s]*\)[^()\s]*)*)"
     r"(?:\s+(?:\"[^\"\n]*\"|'[^'\n]*'))?\s*\)"
 )
+# A reference definition: "[label]: target" with an optional title. Labels
+# starting with "^" are footnotes ("[^1]: text"), not links.
+REF_DEF_RE = re.compile(
+    r"^ {0,3}\[(?!\^)([^\[\]\n]*[^\[\]\s][^\[\]\n]*)\]:[ \t]*(<[^>\n]*>|\S+)"
+    r"(?:[ \t]+(?:\"[^\"\n]*\"|'[^'\n]*'|\([^()\n]*\)))?[ \t]*$"
+)
+# A reference use: "[text][label]", "[text][]" (collapsed) or "[text]" (shortcut).
+REF_USE_RE = re.compile(r"(?<![\]\\])\[([^\[\]\n]+)\](?:\[([^\[\]\n]*)\])?(?![(:])")
 
 
 @dataclass(frozen=True)
@@ -115,6 +123,8 @@ def inline_tags(lines: list[str]) -> list[str]:
         line = URL_RE.sub(_blank, line)
         line = WIKI_RE.sub(_blank, line)
         line = MD_LINK_RE.sub(_blank, line)
+        if REF_DEF_RE.match(line):
+            continue  # "[ref]: #section" is a link anchor, not a tag
         for m in TAG_RE.finditer(line):
             tag = m.group(1).rstrip("/-")
             # Pure numbers ("#1", "#2024-05") are issue refs or dates, not tags.
@@ -132,10 +142,40 @@ def extract_tags(text: str) -> set[str]:
     return tags
 
 
+def normalize_label(label: str) -> str:
+    """Reference labels match case-insensitively with whitespace collapsed."""
+    return " ".join(label.split()).casefold()
+
+
+def _unbracket(target: str) -> str:
+    target = target.strip()
+    if target.startswith("<") and target.endswith(">"):
+        target = target[1:-1].strip()
+    return target
+
+
+def reference_definitions(lines: list[str]) -> dict[str, str]:
+    """{normalized label: target} from code-stripped lines; the first definition wins."""
+    defs: dict[str, str] = {}
+    for line in lines:
+        m = REF_DEF_RE.match(line)
+        if m:
+            defs.setdefault(normalize_label(m.group(1)), _unbracket(m.group(2)))
+    return defs
+
+
 def extract_links(text: str) -> list[Link]:
-    """Wiki links and Markdown links outside code, with 1-based line numbers."""
+    """Wiki, inline Markdown and reference-style links outside code, 1-based lines.
+
+    A reference-style link (`[text][ref]`, `[text][]` or `[text]`) is reported
+    on the line where it is used, with the target of its `[ref]: target`
+    definition. References without a definition are plain text, as in
+    CommonMark, and definitions that nothing uses are not links.
+    """
     links: list[Link] = []
-    for no, line in enumerate(strip_code(text.split("\n")), start=1):
+    lines = strip_code(text.split("\n"))
+    defs = reference_definitions(lines) if "]:" in text else {}
+    for no, line in enumerate(lines, start=1):
         if "[" not in line:
             continue
         for m in WIKI_RE.finditer(line):
@@ -144,8 +184,13 @@ def extract_links(text: str) -> list[Link]:
             links.append(Link(no, target, "wiki"))
         rest = WIKI_RE.sub(_blank, line)
         for m in MD_LINK_RE.finditer(rest):
-            target = m.group(1).strip()
-            if target.startswith("<") and target.endswith(">"):
-                target = target[1:-1].strip()
-            links.append(Link(no, target, "markdown"))
+            links.append(Link(no, _unbracket(m.group(1)), "markdown"))
+        if not defs or REF_DEF_RE.match(line):
+            continue
+        rest = MD_LINK_RE.sub(_blank, rest)
+        for m in REF_USE_RE.finditer(rest):
+            label = m.group(2) if m.group(2) else m.group(1)
+            target = defs.get(normalize_label(label))
+            if target is not None:
+                links.append(Link(no, target, "markdown"))
     return links

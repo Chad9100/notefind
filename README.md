@@ -169,9 +169,10 @@ these, and none show up above.
 
 ```console
 $ notefind links
+daily/2026-05-02.md:7: broken link -> ../projects/pruning.md
 projects/Reading List.md:10: broken link -> Pruning
 projects/watering.md:6: broken link -> ../manuals/timer.md
-2 broken (8 links checked in 6 notes)
+3 broken (10 links checked in 6 notes)
 $ echo $?
 1
 ```
@@ -183,6 +184,12 @@ $ echo $?
 - `[text](other.md)`, `[text](sub/other.md#anchor)` and images resolve
   relative to the linking note (a leading `/` means the notes folder).
   `%20` escapes and `<angle brackets>` are handled.
+- Reference-style links (`[text][ref]`, `[text][]` and `[text]`, with a
+  `[ref]: path "optional title"` definition anywhere in the note) are checked
+  like `[text](path)` and reported on the line where they are *used*. Labels
+  match case-insensitively; the first definition wins. A reference with no
+  definition is plain text (as in CommonMark), and `[^1]:` footnotes are not
+  links.
 - `http(s)://`, `mailto:` and other URLs, and pure `#anchors`, are skipped.
 - Links inside code blocks and inline code are ignored.
 
@@ -192,8 +199,14 @@ Exit code is 1 if any link is broken, 0 otherwise, so it can gate a CI job.
 ```console
 $ notefind links --json
 {
-  "checked": 8,
+  "checked": 10,
   "broken": [
+    {
+      "path": "daily/2026-05-02.md",
+      "line": 7,
+      "kind": "markdown",
+      "target": "../projects/pruning.md"
+    },
     {
       "path": "projects/Reading List.md",
       "line": 10,
@@ -221,10 +234,10 @@ projects/Reading List.md:6: -> Garden Plan
 
 `NOTE` can be a note name (`"Garden Plan"`), a file name (`"Garden Plan.md"`) or
 a path (`projects/watering`), matched case-insensitively. Both wiki links
-(including aliases and `#heading` links) and relative Markdown links count; a
-note linking to itself does not. If a name matches notes in several folders,
-`backlinks` lists them and asks for a path instead (exit code 2). It exits with
-1 when nothing links to the note. `--json` prints
+(including aliases and `#heading` links) and relative Markdown links, inline or
+reference-style, count; a note linking to itself does not. If a name matches
+notes in several folders, `backlinks` lists them and asks for a path instead
+(exit code 2). It exits with 1 when nothing links to the note. `--json` prints
 `{"note": ..., "backlinks": [{"path", "line", "kind", "link"}, ...]}`.
 
 ### orphans
