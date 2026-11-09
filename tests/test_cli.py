@@ -75,6 +75,28 @@ def test_search_json_shape(vault, capsys):
     ]
 
 
+def test_search_fuzzy_finds_typos(vault, capsys):
+    code, out, err = run(capsys, "search", "tomatoe", "-C", str(vault), "--color", "never")
+    assert code == 1 and out == ""
+    code, out, err = run(capsys, "search", "tomatoe", "basl", "--fuzzy", "-C", str(vault),
+                         "--color", "never")
+    assert code == 0
+    assert out.splitlines() == ["pasta.md:5: Pasta with tomato and basil. Pasta!"]
+    assert "1 note matched" in err
+
+
+def test_search_fuzzy_json_and_highlight(vault, capsys):
+    _, out, _ = run(capsys, "search", "--fuzzy", "breed", "-C", str(vault), "--json")
+    data = json.loads(out)
+    assert data["query"]["fuzzy"] is True
+    assert data["results"] == [
+        {"path": "bread.md", "line": 6, "matches": 1, "snippet": "Rye bread, no tomato.",
+         "fuzzy_words": ["bread"]},
+    ]
+    _, colored, _ = run(capsys, "search", "--fuzzy", "breed", "-C", str(vault), "--color", "always")
+    assert HIGHLIGHT_ON + "bread" in colored
+
+
 def test_color_always_highlights_and_never_does_not(vault, capsys):
     _, colored, _ = run(capsys, "search", "basil", "-C", str(vault), "--color", "always")
     assert HIGHLIGHT_ON + "basil" in colored

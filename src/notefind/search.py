@@ -13,6 +13,7 @@ TOKEN_RE = re.compile(r'(-?)(?:"([^"]*)"?|(\S+))')
 HIGHLIGHT_ON = "\x1b[1;31m"
 HIGHLIGHT_OFF = "\x1b[0m"
 SNIPPET_WIDTH = 100
+WORD_RE = re.compile(r"\w+")
 
 
 @dataclass
@@ -37,6 +38,9 @@ class Hit:
     line: int
     matches: int
     snippet: str
+    # With fuzzy search: the words in the note that matched a term only
+    # because they are within its typo budget (lowercased, sorted).
+    fuzzy_words: list[str] = field(default_factory=list)
 
 
 def _add(query: Query, text: str, negative: bool, quoted: bool) -> None:
@@ -85,6 +89,88 @@ def parse_query(parts: str | Sequence[str]) -> Query:
 def compile_pattern(text: str) -> re.Pattern[str]:
     """Case-insensitive pattern; whitespace inside a phrase matches any whitespace."""
     return re.compile(r"\s+".join(re.escape(w) for w in text.split()), re.IGNORECASE)
+
+
+def typo_budget(term: str) -> int:
+    """How many typos --fuzzy tolerates in a term: 0 up to 3 characters,
+    1 for 4-7 characters, 2 from 8 characters on. Terms that aren't a single
+    word (``c++``, ``2026-05-02``) are always matched exactly."""
+    if not WORD_RE.fullmatch(term):
+        return 0
+    n = len(term)
+    if n <= 3:
+        return 0
+    return 1 if n <= 7 else 2
+
+
+def edit_distance(a: str, b: str, limit: int) -> int:
+    """Optimal string alignment distance between a and b: insertions,
+    deletions, substitutions and swaps of two neighbouring characters each
+    cost 1. Returns ``limit + 1`` as soon as the distance must exceed limit."""
+    if abs(len(a) - len(b)) > limit:
+        return limit + 1
+    prev2: list[int] = []
+    prev = list(range(len(b) + 1))
+    for i in range(1, len(a) + 1):
+        cur = [i] + [0] * len(b)
+        for j in range(1, len(b) + 1):
+            cost = 0 if a[i - 1] == b[j - 1] else 1
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+            if i > 1 and j > 1 and a[i - 1] == b[j - 2] and a[i - 2] == b[j - 1]:
+                cur[j] = min(cur[j], prev2[j - 2] + 1)
+        if min(cur) > limit:
+            return limit + 1
+        prev2, prev = prev, cur
+    return prev[-1] if prev[-1] <= limit else limit + 1
+
+
+class FuzzyTerm:
+    """A search term that also matches whole words within its typo budget."""
+
+    def __init__(self, term: str, budget: int | None = None) -> None:
+        self.term = term
+        self.lower = term.lower()
+        self.budget = typo_budget(term) if budget is None else budget
+        self.exact = compile_pattern(term)
+        self._close: dict[str, bool] = {}  # word -> within budget, across notes
+
+    def is_close(self, word: str) -> bool:
+        """True for a word that doesn't contain the term but is within budget."""
+        known = self._close.get(word)
+        if known is None:
+            known = (
+                self.lower not in word
+                and edit_distance(word, self.lower, self.budget) <= self.budget
+            )
+            self._close[word] = known
+        return known
+
+    def pattern_for(self, words: set[str]) -> tuple[re.Pattern[str], list[str]]:
+        """Pattern matching the term or any close word in `words` (the note's
+        lowercased vocabulary), plus the close words found."""
+        if self.budget <= 0:
+            return self.exact, []
+        close = sorted(w for w in words if self.is_close(w))
+        if not close:
+            return self.exact, []
+        return _term_or_words(self.exact.pattern, close), close
+
+
+def _words_alternation(words: list[str]) -> str:
+    # Longest first, so "tomatoes" wins over "tomato" at the same position.
+    alternation = "|".join(re.escape(w) for w in sorted(words, key=lambda w: (-len(w), w)))
+    return rf"\b(?:{alternation})\b"
+
+
+def _term_or_words(term_pattern: str, words: list[str]) -> re.Pattern[str]:
+    return re.compile(rf"{term_pattern}|{_words_alternation(words)}", re.IGNORECASE)
+
+
+def words_pattern(words: list[str]) -> re.Pattern[str] | None:
+    """Whole-word pattern for highlighting the fuzzy words of a hit."""
+    if not words:
+        return None
+    return re.compile(_words_alternation(words), re.IGNORECASE)
 
 
 def _has_tag(tags: set[str], wanted: str) -> bool:
@@ -137,9 +223,16 @@ def _first_body_line(note: Note) -> int:
     return 1
 
 
-def search(notes: list[Note], query: Query) -> list[Hit]:
-    """Return matching notes, most matches first, ties broken by path."""
-    positive = [compile_pattern(s) for s in query.positive]
+def search(notes: list[Note], query: Query, fuzzy: bool = False) -> list[Hit]:
+    """Return matching notes, most matches first, ties broken by path.
+
+    With ``fuzzy``, each plain term also matches whole words within its typo
+    budget (see ``typo_budget``). Phrases, exclusions and tags stay exact.
+    """
+    fuzzy_terms = [FuzzyTerm(t) for t in query.terms] if fuzzy else []
+    fuzzy_terms = [f for f in fuzzy_terms if f.budget > 0]
+    exact_terms = [t for t in query.terms if t not in {f.term for f in fuzzy_terms}]
+    static = [compile_pattern(s) for s in exact_terms + query.phrases]
     negative = [compile_pattern(s) for s in query.excludes]
     hits: list[Hit] = []
     for note in notes:
@@ -152,6 +245,14 @@ def search(notes: list[Note], query: Query) -> list[Hit]:
                 continue
             if any(_has_tag(tags, t) for t in query.exclude_tags):
                 continue
+        positive = list(static)
+        close_words: set[str] = set()
+        if fuzzy_terms:
+            vocab = set(WORD_RE.findall(text.lower()))
+            for fterm in fuzzy_terms:
+                pattern, close = fterm.pattern_for(vocab)
+                positive.append(pattern)
+                close_words.update(close)
         total = 0
         first: int | None = None
         for pattern in positive:
@@ -166,6 +267,6 @@ def search(notes: list[Note], query: Query) -> list[Hit]:
             else:
                 line = text.count("\n", 0, first) + 1
             snippet = make_snippet(note.lines[line - 1], positive)
-            hits.append(Hit(note.rel, line, total, snippet))
+            hits.append(Hit(note.rel, line, total, snippet, sorted(close_words)))
     hits.sort(key=lambda h: (-h.matches, h.path))
     return hits

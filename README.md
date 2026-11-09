@@ -6,8 +6,8 @@ Search and check a folder of Markdown notes from the command line.
 plain directories. It does these things:
 
 - **search**: case-insensitive full-text search with AND-ed terms, `"phrases"`,
-  `-exclusions` and `tag:` filters, ranked by number of matches, with the
-  matching line shown and highlighted;
+  `-exclusions` and `tag:` filters, optional typo tolerance (`--fuzzy`),
+  ranked by number of matches, with the matching line shown and highlighted;
 - **tags**: list every tag (front matter and inline `#tags`) with note counts;
 - **links**: find broken `[[wiki links]]` and relative `[markdown](links.md)`,
   including `#Heading` and `#^block` anchors that don't exist;
@@ -52,7 +52,7 @@ The output below is real output from the made-up notes in
 ### search
 
 ```
-notefind search QUERY... [-C FOLDER] [--limit N] [--json] [--color auto|always|never]
+notefind search QUERY... [-C FOLDER] [--limit N] [--json] [--fuzzy] [--color auto|always|never]
 ```
 
 | Query               | Meaning                                         |
@@ -105,6 +105,75 @@ no notes matched
 $ echo $?
 1
 ```
+
+#### Typos: `--fuzzy`
+
+With `--fuzzy`, each plain term also matches whole words that are a few typos
+away from it. A typo is one inserted, deleted or changed character, or two
+neighbouring characters swapped (`tomaot` -> `tomato`). The allowance grows
+with the term's length:
+
+| Term length    | Typos allowed |
+|----------------|---------------|
+| 1-3 characters | 0 (exact)     |
+| 4-7 characters | 1             |
+| 8 or more      | 2             |
+
+Exact substring matches still count, so `--fuzzy` only ever adds results.
+Phrases, `-exclusions`, `tag:` filters and terms that aren't a single word
+(`c++`, `2026-05-02`) stay exact. Typo matches count towards the ranking like
+exact ones and are highlighted too.
+
+```console
+$ notefind search tomatos
+no notes matched
+
+$ notefind search tomatos --fuzzy
+Garden Plan.md:7: Raised beds go along the south fence. Tomatoes need full sun, so they get
+Compost.md:13: Tomato vines go in the green pile, but not if they had blight.
+Seed Order.md:8: | Cherry tomato   | 2       |
+daily/2026-05-02.md:3: Planted the cherry tomatoes and basil today. Covered the lettuce
+projects/watering.md:3: Water tomatoes deeply twice a week; basil likes lighter, more frequent
+5 notes matched
+
+$ notefind search compst ratio --fuzzy
+Garden Plan.md:11: - Compost notes live in [[Compost#Ratios|the compost note]]
+Compost.md:6: # Compost
+2 notes matched
+```
+
+In `--json` output the query gets `"fuzzy": true` and every result lists the
+words that matched only thanks to the typo allowance:
+
+```console
+$ notefind search wartering --fuzzy --limit 1 --json
+{
+  "query": {
+    "terms": [
+      "wartering"
+    ],
+    "phrases": [],
+    "exclude": [],
+    "tags": [],
+    "exclude_tags": [],
+    "fuzzy": true
+  },
+  "total": 3,
+  "results": [
+    {
+      "path": "Garden Plan.md",
+      "line": 12,
+      "matches": 4,
+      "snippet": "- Watering schedule: [watering](projects/watering.md#watering-schedule)",
+      "fuzzy_words": [
+        "watering"
+      ]
+    }
+  ]
+}
+```
+
+#### Options and exclusions
 
 Any argument that starts with a single `-` and isn't one of the options
 (`-C`, `-h`) is an exclusion, so `notefind search pasta -tomato` just works.

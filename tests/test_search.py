@@ -1,12 +1,18 @@
+import pytest
+
 from notefind.scan import Note
 from notefind.search import (
     HIGHLIGHT_OFF,
     HIGHLIGHT_ON,
+    FuzzyTerm,
     compile_pattern,
+    edit_distance,
     highlight,
     make_snippet,
     parse_query,
     search,
+    typo_budget,
+    words_pattern,
 )
 
 
@@ -132,3 +138,90 @@ def test_highlight_merges_overlapping_matches():
 
 def test_highlight_off_returns_plain_text():
     assert highlight("pasta", [compile_pattern("pasta")], color=False) == "pasta"
+
+
+# --- fuzzy matching -------------------------------------------------------
+
+@pytest.mark.parametrize("a, b, expected", [
+    ("tomato", "tomato", 0),
+    ("tomatos", "tomatoes", 1),   # insertion
+    ("compst", "compost", 1),     # deletion
+    ("basel", "basil", 1),        # substitution
+    ("tomaot", "tomato", 1),      # swap of neighbours counts once
+    ("wtaer", "water", 1),
+    ("kitten", "sitting", 3),
+])
+def test_edit_distance(a, b, expected):
+    assert edit_distance(a, b, limit=5) == expected
+    assert edit_distance(b, a, limit=5) == expected
+
+
+def test_edit_distance_stops_early_past_the_limit():
+    assert edit_distance("kitten", "sitting", limit=1) == 2
+    assert edit_distance("a", "abcdef", limit=2) == 3
+
+
+@pytest.mark.parametrize("term, budget", [
+    ("fig", 0), ("kale", 1), ("tomatos", 1), ("compostin", 2),
+    ("c++", 0), ("2026-05-02", 0), ("follow-up", 0),
+])
+def test_typo_budget_grows_with_length_and_skips_non_words(term, budget):
+    assert typo_budget(term) == budget
+
+
+def test_fuzzy_off_by_default():
+    notes = [note("a.md", "Tomatoes need sun")]
+    assert search(notes, parse_query(["tomatos"])) == []
+
+
+def test_fuzzy_matches_typos_and_reports_the_words():
+    notes = [
+        note("a.md", "Tomatoes need sun.\nMore tomatoes here."),
+        note("b.md", "A cherry tomato."),
+        note("c.md", "Potatoes only."),  # two substitutions away
+    ]
+    hits = search(notes, parse_query(["tomatos"]), fuzzy=True)
+    assert [(h.path, h.matches, h.fuzzy_words) for h in hits] == [
+        ("a.md", 2, ["tomatoes"]),
+        ("b.md", 1, ["tomato"]),
+    ]
+    assert hits[0].line == 1
+
+
+def test_fuzzy_still_matches_substrings_exactly():
+    hits = search([note("a.md", "Composting the pile")], parse_query(["compost"]), fuzzy=True)
+    assert len(hits) == 1 and hits[0].fuzzy_words == []
+
+
+def test_fuzzy_short_terms_stay_exact():
+    notes = [note("a.md", "a fog in the morning")]
+    assert search(notes, parse_query(["fig"]), fuzzy=True) == []
+
+
+def test_fuzzy_needs_whole_words_and_all_terms():
+    notes = [
+        note("a.md", "the compost pile"),
+        note("b.md", "the compost heap"),
+    ]
+    hits = search(notes, parse_query(["compst", "piles"]), fuzzy=True)
+    assert [(h.path, h.fuzzy_words) for h in hits] == [("a.md", ["compost", "pile"])]
+
+
+def test_fuzzy_does_not_loosen_phrases_or_exclusions():
+    notes = [note("a.md", "full sun for tomatoes"), note("b.md", "tomatoes and blight")]
+    assert search(notes, parse_query(['"ful sun"']), fuzzy=True) == []
+    hits = search(notes, parse_query(["tomatos", "-blite"]), fuzzy=True)
+    assert [h.path for h in hits] == ["a.md", "b.md"]
+
+
+def test_fuzzy_term_caches_word_decisions():
+    term = FuzzyTerm("basel")
+    assert term.is_close("basil") and not term.is_close("bagels")
+    assert term._close == {"basil": True, "bagels": False}
+
+
+def test_words_pattern_highlights_whole_words_only():
+    pattern = words_pattern(["tomato", "tomatoes"])
+    out = highlight("Tomatoes, tomatoey", [pattern], color=True)
+    assert out == f"{HIGHLIGHT_ON}Tomatoes{HIGHLIGHT_OFF}, tomatoey"
+    assert words_pattern([]) is None

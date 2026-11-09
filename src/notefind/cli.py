@@ -15,7 +15,7 @@ from .graph import NoteResolver, backlinks, link_edges, orphans
 from .linkcheck import find_broken_links
 from .parse import extract_tags
 from .scan import load_notes, walk_files
-from .search import compile_pattern, highlight, parse_query, search
+from .search import compile_pattern, highlight, parse_query, search, words_pattern
 
 PATH_COLOR = "\x1b[35m"
 LINE_COLOR = "\x1b[32m"
@@ -90,6 +90,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=20, metavar="N", help="max results (default 20)")
     p.add_argument("--json", action="store_true", help="print JSON")
     p.add_argument(
+        "--fuzzy", action="store_true",
+        help="let plain terms also match words with typos: 1 typo for 4-7 "
+             "letters, 2 from 8 letters (phrases, exclusions and tags stay exact)",
+    )
+    p.add_argument(
         "--color", choices=("auto", "always", "never"), default="auto",
         help="highlight matches (default: auto, only on a terminal without NO_COLOR)",
     )
@@ -141,7 +146,7 @@ def _cmd_search(args: argparse.Namespace, root: Path) -> int:
     if query.is_empty():
         print("notefind: search needs at least one term, phrase or tag:", file=sys.stderr)
         return 2
-    hits = search(load_notes(root), query)
+    hits = search(load_notes(root), query, fuzzy=args.fuzzy)
     shown = hits[: max(args.limit, 0)]
     if args.json:
         payload = {
@@ -151,10 +156,12 @@ def _cmd_search(args: argparse.Namespace, root: Path) -> int:
                 "exclude": query.excludes,
                 "tags": query.tags,
                 "exclude_tags": query.exclude_tags,
+                **({"fuzzy": True} if args.fuzzy else {}),
             },
             "total": len(hits),
             "results": [
-                {"path": h.path, "line": h.line, "matches": h.matches, "snippet": h.snippet}
+                {"path": h.path, "line": h.line, "matches": h.matches, "snippet": h.snippet,
+                 **({"fuzzy_words": h.fuzzy_words} if args.fuzzy else {})}
                 for h in shown
             ],
         }
@@ -166,7 +173,9 @@ def _cmd_search(args: argparse.Namespace, root: Path) -> int:
             loc = f"{h.path}:{h.line}"
             if color:
                 loc = f"{PATH_COLOR}{h.path}{RESET}:{LINE_COLOR}{h.line}{RESET}"
-            print(f"{loc}: {highlight(h.snippet, patterns, color)}")
+            extra = words_pattern(h.fuzzy_words)
+            line_patterns = patterns + [extra] if extra else patterns
+            print(f"{loc}: {highlight(h.snippet, line_patterns, color)}")
         sys.stdout.flush()  # keep the summary after the results when 2>&1
         if hits:
             note = "note" if len(hits) == 1 else "notes"
