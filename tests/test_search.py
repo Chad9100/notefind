@@ -1,0 +1,134 @@
+from notefind.scan import Note
+from notefind.search import (
+    HIGHLIGHT_OFF,
+    HIGHLIGHT_ON,
+    compile_pattern,
+    highlight,
+    make_snippet,
+    parse_query,
+    search,
+)
+
+
+def note(rel, text):
+    return Note(rel=rel, path=None, text=text)
+
+
+# --- query parsing --------------------------------------------------------
+
+def test_plain_terms_are_anded():
+    q = parse_query(["pasta", "Tomato"])
+    assert q.terms == ["pasta", "Tomato"]
+    assert q.phrases == [] and q.excludes == []
+
+
+def test_quoted_phrase_inside_one_string():
+    q = parse_query('soup "olive oil" salt')
+    assert q.terms == ["soup", "salt"]
+    assert q.phrases == ["olive oil"]
+
+
+def test_shell_split_argument_with_space_is_phrase():
+    q = parse_query(["olive oil", "salt"])
+    assert q.phrases == ["olive oil"]
+    assert q.terms == ["salt"]
+
+
+def test_exclusions_terms_and_phrases():
+    q = parse_query(['pasta -tomato -"cream sauce"'])
+    assert q.terms == ["pasta"]
+    assert q.excludes == ["tomato", "cream sauce"]
+
+
+def test_tag_filters():
+    q = parse_query(["tag:Recipe", "-tag:#draft", "bread"])
+    assert q.tags == ["recipe"]
+    assert q.exclude_tags == ["draft"]
+    assert q.terms == ["bread"]
+
+
+def test_hyphenated_word_is_a_term_and_empty_query_detected():
+    assert parse_query(["follow-up"]).terms == ["follow-up"]
+    assert parse_query(["-only", "-excludes"]).is_empty()
+
+
+def test_quoted_tag_text_is_a_phrase_not_a_filter():
+    q = parse_query('"tag:x"')
+    assert q.tags == [] and q.phrases == ["tag:x"]
+
+
+# --- matching and ranking -------------------------------------------------
+
+def test_search_is_case_insensitive_and_requires_all_terms():
+    notes = [note("a.md", "Pasta with TOMATO"), note("b.md", "pasta only")]
+    hits = search(notes, parse_query(["pasta", "tomato"]))
+    assert [h.path for h in hits] == ["a.md"]
+
+
+def test_ranked_by_match_count_then_path():
+    notes = [
+        note("c.md", "kiwi"),
+        note("a.md", "kiwi"),
+        note("b.md", "kiwi kiwi kiwi"),
+    ]
+    hits = search(notes, parse_query(["kiwi"]))
+    assert [(h.path, h.matches) for h in hits] == [("b.md", 3), ("a.md", 1), ("c.md", 1)]
+
+
+def test_phrase_matches_across_whitespace_but_not_reordered():
+    notes = [note("a.md", "olive\n  oil"), note("b.md", "oil and olive")]
+    hits = search(notes, parse_query(['"olive oil"']))
+    assert [h.path for h in hits] == ["a.md"]
+
+
+def test_exclusion_drops_notes():
+    notes = [note("a.md", "bread rye"), note("b.md", "bread wheat")]
+    hits = search(notes, parse_query(["bread", "-rye"]))
+    assert [h.path for h in hits] == ["b.md"]
+
+
+def test_tag_filter_restricts_and_matches_nested_tags():
+    notes = [
+        note("a.md", "---\ntags: [recipe]\n---\nbread\n"),
+        note("b.md", "bread #recipe/baking\n"),
+        note("c.md", "bread without tag\n"),
+    ]
+    hits = search(notes, parse_query(["tag:recipe", "bread"]))
+    assert sorted(h.path for h in hits) == ["a.md", "b.md"]
+
+
+def test_tag_only_query_lists_tagged_notes_at_first_body_line():
+    notes = [note("a.md", "---\ntags: [x]\n---\n\nFirst line\n"), note("b.md", "nothing")]
+    hits = search(notes, parse_query(["tag:x"]))
+    assert len(hits) == 1
+    assert hits[0].line == 5 and hits[0].snippet == "First line"
+
+
+def test_hit_reports_first_matching_line():
+    hits = search([note("a.md", "one\ntwo\nthree apple\napple")], parse_query(["apple"]))
+    assert hits[0].line == 3
+    assert hits[0].snippet == "three apple"
+
+
+# --- snippets and highlighting -------------------------------------------
+
+def test_long_line_snippet_is_cut_around_match():
+    line = "x" * 200 + " needle " + "y" * 200
+    snip = make_snippet(line, [compile_pattern("needle")], width=60)
+    assert "needle" in snip
+    assert snip.startswith("...") and snip.endswith("...")
+    assert len(snip) == 66
+
+
+def test_highlight_wraps_every_match_preserving_case():
+    out = highlight("Pasta and pasta", [compile_pattern("pasta")], color=True)
+    assert out == f"{HIGHLIGHT_ON}Pasta{HIGHLIGHT_OFF} and {HIGHLIGHT_ON}pasta{HIGHLIGHT_OFF}"
+
+
+def test_highlight_merges_overlapping_matches():
+    out = highlight("olive oil", [compile_pattern("olive oil"), compile_pattern("oil")], color=True)
+    assert out == f"{HIGHLIGHT_ON}olive oil{HIGHLIGHT_OFF}"
+
+
+def test_highlight_off_returns_plain_text():
+    assert highlight("pasta", [compile_pattern("pasta")], color=False) == "pasta"
