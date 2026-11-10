@@ -48,7 +48,8 @@ That puts a `notefind` command on your PATH. `python -m notefind` works too.
 ## Usage
 
 Every command scans the current directory by default; use `-C FOLDER` to point
-it somewhere else. All commands accept `--json`.
+it somewhere else. All commands accept `--json`, and `-j N` to choose how many
+threads read the notes (see [Files](#files)).
 
 The output below is real output from the made-up notes in
 [`examples/notes/`](examples/notes), run from inside that folder.
@@ -601,6 +602,12 @@ Notes are `*.md` and `*.markdown` files. They are read as UTF-8 (a BOM is
 stripped, undecodable bytes become `?`-style replacement characters) and CRLF
 line endings are handled, so line numbers are right for files written on
 Windows. Paths are always printed with `/`.
+
+Folders with 64 or more notes are read by a small thread pool (one thread per
+CPU, at most 8), which helps most on network drives and cold disk caches.
+`-j N` / `--jobs N` sets the thread count for any command; `-j 1` reads one
+file at a time. Output is identical either way: notes are always processed in
+path order.
 
 ## Development
 

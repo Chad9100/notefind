@@ -34,7 +34,7 @@ Estimates are rough working hours for one person, including tests and docs.
 
 - [ ] Optional cached index (`.notefind-cache`, keyed by mtime and size) so
       repeated runs on 10k+ notes only re-read changed files (4 h)
-- [ ] Parallel reading on cold runs (1 h)
+- [x] Parallel reading on cold runs, with `-j/--jobs N` (1 h)
 - [ ] Benchmarks on a generated 20k-note vault in CI (2 h)
 
 ## v0.5 - maintenance commands (about 9 h)

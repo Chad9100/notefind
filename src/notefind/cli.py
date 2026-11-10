@@ -26,7 +26,7 @@ RESET = "\x1b[0m"
 
 # Options the search command understands. Any other argument starting with a
 # single "-" is an exclusion term, so `notefind search pasta -tomato` works.
-_SEARCH_VALUE_OPTS = {"-C", "--folder", "--limit", "--color"}
+_SEARCH_VALUE_OPTS = {"-C", "--folder", "-j", "--jobs", "--limit", "--color"}
 _SEARCH_SHORT_FLAGS = {"-h", "-w"}
 
 
@@ -69,6 +69,20 @@ def _add_folder(parser: argparse.ArgumentParser) -> None:
         "-C", "--folder", default=".", metavar="FOLDER",
         help="notes folder to scan (default: current directory)",
     )
+    parser.add_argument(
+        "-j", "--jobs", type=_positive_int, default=None, metavar="N",
+        help="threads for reading notes (default: automatic; 1 = sequential)",
+    )
+
+
+def _positive_int(value: str) -> int:
+    try:
+        n = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {value!r}") from None
+    if n < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {n}")
+    return n
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -186,9 +200,8 @@ def _cmd_search(args: argparse.Namespace, root: Path) -> int:
     try:
         # Compile before reading the folder, so a bad regex fails fast.
         patterns = [compile_pattern(s, **opts) for s in query.positive + query.excludes]
-        hits = search(
-            load_notes(root), query, fuzzy=args.fuzzy, all_lines=args.all_lines, **opts
-        )
+        notes = load_notes(root, jobs=args.jobs)
+        hits = search(notes, query, fuzzy=args.fuzzy, all_lines=args.all_lines, **opts)
     except QueryError as exc:
         print(f"notefind: {exc}", file=sys.stderr)
         return 2
@@ -245,7 +258,7 @@ def _cmd_search(args: argparse.Namespace, root: Path) -> int:
 
 def _cmd_tags(args: argparse.Namespace, root: Path) -> int:
     counts: Counter[str] = Counter()
-    for note in load_notes(root):
+    for note in load_notes(root, jobs=args.jobs):
         counts.update(extract_tags(note.text))
     rows = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     if args.json:
@@ -264,7 +277,7 @@ def _cmd_links(args: argparse.Namespace, root: Path) -> int:
     if args.fix:
         args.suggest = True
     files = walk_files(root)
-    notes = load_notes(root, files)
+    notes = load_notes(root, files, jobs=args.jobs)
     broken, checked = find_broken_links(
         root, notes, files, check_anchors=not args.no_anchors, suggest=args.suggest
     )
@@ -313,7 +326,7 @@ def _cmd_links(args: argparse.Namespace, root: Path) -> int:
 
 
 def _cmd_backlinks(args: argparse.Namespace, root: Path) -> int:
-    notes = load_notes(root)
+    notes = load_notes(root, jobs=args.jobs)
     matches = NoteResolver(notes).by_name(args.note)
     if not matches:
         print(f"notefind: no note named {args.note!r}", file=sys.stderr)
@@ -350,7 +363,7 @@ def _cmd_backlinks(args: argparse.Namespace, root: Path) -> int:
 
 
 def _cmd_orphans(args: argparse.Namespace, root: Path) -> int:
-    notes = load_notes(root)
+    notes = load_notes(root, jobs=args.jobs)
     lonely = orphans(notes, link_edges(notes))
     if args.json:
         print(json.dumps({"total_notes": len(notes), "orphans": lonely},
