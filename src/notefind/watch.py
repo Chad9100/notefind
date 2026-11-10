@@ -15,15 +15,16 @@ Snapshot = dict[str, tuple[int, int]]
 CLEAR_SCREEN = "\x1b[2J\x1b[H"
 
 
-def snapshot(root: Path) -> Snapshot:
+def snapshot(root: Path, use_ignore: bool = True) -> Snapshot:
     """Record mtime and size of every visible file under root.
 
     Uses the same rules as walk_files, so hidden folders such as .git and
-    .obsidian don't trigger re-runs. Files that vanish mid-scan are left out.
+    .obsidian, and anything in .notefindignore, don't trigger re-runs.
+    Files that vanish mid-scan are left out.
     """
     root = Path(root)
     found: Snapshot = {}
-    for rel in walk_files(root):
+    for rel in walk_files(root, use_ignore):
         try:
             st = os.stat(root / rel)
         except OSError:
@@ -56,6 +57,7 @@ def watch(
     out: TextIO,
     err: TextIO,
     sleep: Callable[[float], None] | None = None,
+    use_ignore: bool = True,
 ) -> int:
     """Run `run` now and again after every change under root, until Ctrl-C.
 
@@ -73,10 +75,10 @@ def watch(
             out.write(CLEAR_SCREEN)
             out.flush()
         code = run()
-        before = snapshot(root)
+        before = snapshot(root, use_ignore)
         while True:
             sleep(interval)
-            now = snapshot(root)
+            now = snapshot(root, use_ignore)
             changed = changed_files(before, now)
             if not changed:
                 continue
@@ -86,7 +88,7 @@ def watch(
             print(f"notefind: {describe(changed)}; running again", file=err)
             err.flush()
             code = run()
-            before = snapshot(root)
+            before = snapshot(root, use_ignore)
     except KeyboardInterrupt:
         print("notefind: stopped watching", file=err)
     return code

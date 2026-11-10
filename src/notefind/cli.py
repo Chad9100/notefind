@@ -74,6 +74,10 @@ def _add_folder(parser: argparse.ArgumentParser) -> None:
         "-j", "--jobs", type=_positive_int, default=None, metavar="N",
         help="threads for reading notes (default: automatic; 1 = sequential)",
     )
+    parser.add_argument(
+        "--no-ignore", action="store_true",
+        help="don't skip files matched by the folder's .notefindignore",
+    )
 
 
 def _positive_int(value: str) -> int:
@@ -233,7 +237,7 @@ def _cmd_search(args: argparse.Namespace, root: Path) -> int:
     try:
         # Compile before reading the folder, so a bad regex fails fast.
         patterns = [compile_pattern(s, **opts) for s in query.positive + query.excludes]
-        notes = load_notes(root, jobs=args.jobs)
+        notes = load_notes(root, jobs=args.jobs, use_ignore=not args.no_ignore)
         hits = search(notes, query, fuzzy=args.fuzzy, all_lines=args.all_lines, **opts)
     except QueryError as exc:
         print(f"notefind: {exc}", file=sys.stderr)
@@ -291,7 +295,7 @@ def _cmd_search(args: argparse.Namespace, root: Path) -> int:
 
 def _cmd_tags(args: argparse.Namespace, root: Path) -> int:
     counts: Counter[str] = Counter()
-    for note in load_notes(root, jobs=args.jobs):
+    for note in load_notes(root, jobs=args.jobs, use_ignore=not args.no_ignore):
         counts.update(extract_tags(note.text))
     rows = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     if args.json:
@@ -309,7 +313,7 @@ def _cmd_links(args: argparse.Namespace, root: Path) -> int:
         return 2
     if args.fix:
         args.suggest = True
-    files = walk_files(root)
+    files = walk_files(root, use_ignore=not args.no_ignore)
     notes = load_notes(root, files, jobs=args.jobs)
     broken, checked = find_broken_links(
         root, notes, files, check_anchors=not args.no_anchors, suggest=args.suggest
@@ -359,7 +363,7 @@ def _cmd_links(args: argparse.Namespace, root: Path) -> int:
 
 
 def _cmd_backlinks(args: argparse.Namespace, root: Path) -> int:
-    notes = load_notes(root, jobs=args.jobs)
+    notes = load_notes(root, jobs=args.jobs, use_ignore=not args.no_ignore)
     matches = NoteResolver(notes).by_name(args.note)
     if not matches:
         print(f"notefind: no note named {args.note!r}", file=sys.stderr)
@@ -396,7 +400,7 @@ def _cmd_backlinks(args: argparse.Namespace, root: Path) -> int:
 
 
 def _cmd_orphans(args: argparse.Namespace, root: Path) -> int:
-    notes = load_notes(root, jobs=args.jobs)
+    notes = load_notes(root, jobs=args.jobs, use_ignore=not args.no_ignore)
     lonely = orphans(notes, link_edges(notes))
     if args.json:
         print(json.dumps({"total_notes": len(notes), "orphans": lonely},
@@ -440,7 +444,8 @@ def _cmd_watch(args: argparse.Namespace) -> int:
         return code
 
     return watching.watch(
-        root, run, args.interval, clear=args.clear, out=sys.stdout, err=sys.stderr
+        root, run, args.interval, clear=args.clear, out=sys.stdout, err=sys.stderr,
+        use_ignore=not inner_args.no_ignore,
     )
 
 

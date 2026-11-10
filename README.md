@@ -20,7 +20,8 @@ plain directories. It does these things:
 - **watch**: re-run any of the above whenever a note changes.
 
 There is no index and no database. Every run scans the folder, skipping hidden
-directories (`.git`, `.obsidian`, `.trash`, ...) and `node_modules`.
+directories (`.git`, `.obsidian`, `.trash`, ...), `node_modules` and anything
+listed in a [`.notefindignore`](#ignoring-files-notefindignore) file.
 
 ## Who it's for
 
@@ -625,12 +626,45 @@ are checked once at the start, so a typo fails immediately.
 
 - Changes are found by polling file modification times and sizes every
   `--interval` seconds (default 1), with no extra dependencies. Hidden
-  folders (`.git`, `.obsidian`) and `node_modules` are ignored, like
-  everywhere else.
+  folders (`.git`, `.obsidian`), `node_modules` and `.notefindignore`
+  matches are ignored, like everywhere else.
 - Files the command writes itself, such as `links --fix` rewriting a note,
   don't trigger another run.
 - `--clear` clears the terminal before each run.
 - Stop with Ctrl-C; the exit code is the one from the last run.
+
+### Ignoring files: `.notefindignore`
+
+Put a `.notefindignore` file in the notes folder to skip more files and
+folders in every command. Templates are the usual case: their placeholder
+links are not broken links. With `templates/daily.md` containing
+`[[{{yesterday}}]]`:
+
+```console
+$ notefind links
+templates/daily.md:2: broken link -> {{yesterday}}
+1 broken (2 links checked in 3 notes)
+$ printf '# Obsidian templates, not real notes\ntemplates/\n' > .notefindignore
+$ notefind links
+no broken links (1 links checked in 2 notes)
+$ notefind links --no-ignore
+templates/daily.md:2: broken link -> {{yesterday}}
+1 broken (2 links checked in 3 notes)
+```
+
+One pattern per line; blank lines and lines starting with `#` are skipped.
+
+| Pattern        | Skips                                                      |
+| -------------- | ---------------------------------------------------------- |
+| `templates/`   | any folder named `templates` (a trailing `/` means folders only) |
+| `*.draft.md`   | files with that name in any folder                         |
+| `/archive`     | `archive` at the top of the notes folder only              |
+| `daily/2020/`  | that path from the notes folder (any `/` anchors it)       |
+| `**/scratch.md`| `scratch.md` at any depth (`**` crosses folders)           |
+
+`*` and `?` don't match `/`, and matching is case-sensitive. There is no `!`
+negation. Links pointing *into* an ignored folder count as broken, since its
+notes are out of scope. `--no-ignore` on any command reads everything again.
 
 ### Files
 

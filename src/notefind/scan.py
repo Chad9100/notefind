@@ -7,6 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .ignore import is_ignored, load_rules
+
 NOTE_SUFFIXES = (".md", ".markdown")
 SKIP_DIRS = frozenset({"node_modules"})
 
@@ -35,23 +37,26 @@ def is_note(name: str) -> bool:
     return name.lower().endswith(NOTE_SUFFIXES)
 
 
-def walk_files(root: Path) -> list[str]:
+def walk_files(root: Path, use_ignore: bool = True) -> list[str]:
     """Return every visible file under root as a sorted list of "/"-separated paths.
 
     Hidden directories (.git, .obsidian, ...) and node_modules are skipped,
-    as are hidden files.
+    as are hidden files. With use_ignore, files and folders matching a
+    pattern in root/.notefindignore are skipped too.
     """
     root = Path(root)
+    rules = load_rules(root) if use_ignore else []
     found: list[str] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(
-            d for d in dirnames if not d.startswith(".") and d not in SKIP_DIRS
-        )
         rel_dir = Path(dirpath).relative_to(root)
-        for name in filenames:
-            if name.startswith("."):
-                continue
-            found.append((rel_dir / name).as_posix())
+
+        def keep(name: str, is_dir: bool) -> bool:
+            if name.startswith(".") or (is_dir and name in SKIP_DIRS):
+                return False
+            return not (rules and is_ignored(rules, (rel_dir / name).as_posix(), is_dir))
+
+        dirnames[:] = sorted(d for d in dirnames if keep(d, True))
+        found.extend((rel_dir / name).as_posix() for name in filenames if keep(name, False))
     return sorted(found)
 
 
@@ -76,7 +81,10 @@ def _read_note(root: Path, rel: str) -> Note | None:
 
 
 def load_notes(
-    root: Path, files: list[str] | None = None, jobs: int | None = None
+    root: Path,
+    files: list[str] | None = None,
+    jobs: int | None = None,
+    use_ignore: bool = True,
 ) -> list[Note]:
     """Load every Markdown note under root, sorted by relative path.
 
@@ -87,7 +95,7 @@ def load_notes(
     """
     root = Path(root)
     if files is None:
-        files = walk_files(root)
+        files = walk_files(root, use_ignore)
     rels = [rel for rel in files if is_note(rel)]
     if jobs is None:
         jobs = default_jobs() if len(rels) >= PARALLEL_THRESHOLD else 1
