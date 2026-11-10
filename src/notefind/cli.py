@@ -15,7 +15,9 @@ from .graph import NoteResolver, backlinks, link_edges, orphans
 from .linkcheck import find_broken_links
 from .parse import extract_tags
 from .scan import load_notes, walk_files
-from .search import compile_pattern, highlight, parse_query, search, words_pattern
+from .search import (
+    QueryError, compile_pattern, highlight, parse_query, search, words_pattern,
+)
 
 PATH_COLOR = "\x1b[35m"
 LINE_COLOR = "\x1b[32m"
@@ -24,6 +26,7 @@ RESET = "\x1b[0m"
 # Options the search command understands. Any other argument starting with a
 # single "-" is an exclusion term, so `notefind search pasta -tomato` works.
 _SEARCH_VALUE_OPTS = {"-C", "--folder", "--limit", "--color"}
+_SEARCH_SHORT_FLAGS = {"-h", "-w"}
 
 
 def use_color(mode: str, stream: TextIO, environ: dict[str, str] | None = None) -> bool:
@@ -52,7 +55,7 @@ def _split_search_args(args: list[str]) -> tuple[list[str], list[str]]:
             opts.extend(args[i : i + 2])
             i += 2
             continue
-        if arg.startswith("--") or arg == "-h":
+        if arg.startswith("--") or arg in _SEARCH_SHORT_FLAGS:
             opts.append(arg)
         else:
             terms.append(arg)
@@ -93,6 +96,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--fuzzy", action="store_true",
         help="let plain terms also match words with typos: 1 typo for 4-7 "
              "letters, 2 from 8 letters (phrases, exclusions and tags stay exact)",
+    )
+    p.add_argument(
+        "-w", "--word", action="store_true",
+        help="match whole words only: terms, phrases and exclusions can't be "
+             "part of a longer word",
+    )
+    p.add_argument(
+        "--regex", action="store_true",
+        help="treat terms, phrases and exclusions as case-insensitive Python "
+             "regular expressions (^ and $ match at line starts and ends)",
     )
     p.add_argument(
         "--color", choices=("auto", "always", "never"), default="auto",
@@ -146,7 +159,15 @@ def _cmd_search(args: argparse.Namespace, root: Path) -> int:
     if query.is_empty():
         print("notefind: search needs at least one term, phrase or tag:", file=sys.stderr)
         return 2
-    hits = search(load_notes(root), query, fuzzy=args.fuzzy)
+    opts = {"whole_word": args.word, "regex": args.regex}
+    try:
+        # Compile before reading the folder, so a bad regex fails fast.
+        patterns = [compile_pattern(s, **opts) for s in query.positive + query.excludes]
+        hits = search(load_notes(root), query, fuzzy=args.fuzzy, **opts)
+    except QueryError as exc:
+        print(f"notefind: {exc}", file=sys.stderr)
+        return 2
+    patterns = patterns[: len(query.positive)]
     shown = hits[: max(args.limit, 0)]
     if args.json:
         payload = {
@@ -157,6 +178,8 @@ def _cmd_search(args: argparse.Namespace, root: Path) -> int:
                 "tags": query.tags,
                 "exclude_tags": query.exclude_tags,
                 **({"fuzzy": True} if args.fuzzy else {}),
+                **({"whole_word": True} if args.word else {}),
+                **({"regex": True} if args.regex else {}),
             },
             "total": len(hits),
             "results": [
@@ -168,7 +191,6 @@ def _cmd_search(args: argparse.Namespace, root: Path) -> int:
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         color = use_color(args.color, sys.stdout)
-        patterns = [compile_pattern(s) for s in query.positive]
         for h in shown:
             loc = f"{h.path}:{h.line}"
             if color:

@@ -86,9 +86,41 @@ def parse_query(parts: str | Sequence[str]) -> Query:
     return query
 
 
-def compile_pattern(text: str) -> re.Pattern[str]:
-    """Case-insensitive pattern; whitespace inside a phrase matches any whitespace."""
-    return re.compile(r"\s+".join(re.escape(w) for w in text.split()), re.IGNORECASE)
+class QueryError(ValueError):
+    """A search term that can't be used, such as an invalid --regex."""
+
+
+def _whole_word(pattern: str) -> str:
+    # Lookarounds instead of \b, so terms that start or end with a non-word
+    # character (c++, #todo) still work: the match just can't touch a letter,
+    # digit or underscore on either side.
+    return rf"(?<!\w)(?:{pattern})(?!\w)"
+
+
+def compile_pattern(text: str, whole_word: bool = False, regex: bool = False) -> re.Pattern[str]:
+    """Case-insensitive pattern for a term, phrase or exclusion.
+
+    By default the text is literal and whitespace inside a phrase matches any
+    whitespace. With ``regex`` the text is a Python regular expression, with
+    ``^`` and ``$`` matching at line boundaries. With ``whole_word`` the match
+    can't be part of a longer word. Raises QueryError for an invalid regex or
+    one that matches empty text.
+    """
+    if regex:
+        pattern = text
+        flags = re.IGNORECASE | re.MULTILINE
+    else:
+        pattern = r"\s+".join(re.escape(w) for w in text.split())
+        flags = re.IGNORECASE
+    if whole_word:
+        pattern = _whole_word(pattern)
+    try:
+        compiled = re.compile(pattern, flags)
+    except re.error as exc:
+        raise QueryError(f"invalid regex {text!r}: {exc}") from None
+    if regex and compiled.search("") is not None:
+        raise QueryError(f"regex {text!r} matches empty text; it would match every note")
+    return compiled
 
 
 def typo_budget(term: str) -> int:
@@ -127,19 +159,23 @@ def edit_distance(a: str, b: str, limit: int) -> int:
 class FuzzyTerm:
     """A search term that also matches whole words within its typo budget."""
 
-    def __init__(self, term: str, budget: int | None = None) -> None:
+    def __init__(self, term: str, budget: int | None = None, whole_word: bool = False) -> None:
         self.term = term
         self.lower = term.lower()
         self.budget = typo_budget(term) if budget is None else budget
-        self.exact = compile_pattern(term)
+        self.whole_word = whole_word
+        self.exact = compile_pattern(term, whole_word=whole_word)
         self._close: dict[str, bool] = {}  # word -> within budget, across notes
 
     def is_close(self, word: str) -> bool:
-        """True for a word that doesn't contain the term but is within budget."""
+        """True for a word that the exact pattern doesn't already match (one
+        that doesn't contain the term, or with ``whole_word`` isn't the term)
+        but is within budget."""
         known = self._close.get(word)
         if known is None:
+            exact = word == self.lower if self.whole_word else self.lower in word
             known = (
-                self.lower not in word
+                not exact
                 and edit_distance(word, self.lower, self.budget) <= self.budget
             )
             self._close[word] = known
@@ -223,17 +259,29 @@ def _first_body_line(note: Note) -> int:
     return 1
 
 
-def search(notes: list[Note], query: Query, fuzzy: bool = False) -> list[Hit]:
+def search(
+    notes: list[Note],
+    query: Query,
+    fuzzy: bool = False,
+    whole_word: bool = False,
+    regex: bool = False,
+) -> list[Hit]:
     """Return matching notes, most matches first, ties broken by path.
 
     With ``fuzzy``, each plain term also matches whole words within its typo
     budget (see ``typo_budget``). Phrases, exclusions and tags stay exact.
+    With ``whole_word``, terms, phrases and exclusions only match whole words.
+    With ``regex``, they are regular expressions (see ``compile_pattern``);
+    it can't be combined with ``fuzzy``. Raises QueryError for a bad regex.
     """
-    fuzzy_terms = [FuzzyTerm(t) for t in query.terms] if fuzzy else []
+    if fuzzy and regex:
+        raise QueryError("--fuzzy and --regex can't be combined")
+    fuzzy_terms = [FuzzyTerm(t, whole_word=whole_word) for t in query.terms] if fuzzy else []
     fuzzy_terms = [f for f in fuzzy_terms if f.budget > 0]
     exact_terms = [t for t in query.terms if t not in {f.term for f in fuzzy_terms}]
-    static = [compile_pattern(s) for s in exact_terms + query.phrases]
-    negative = [compile_pattern(s) for s in query.excludes]
+    opts = {"whole_word": whole_word, "regex": regex}
+    static = [compile_pattern(s, **opts) for s in exact_terms + query.phrases]
+    negative = [compile_pattern(s, **opts) for s in query.excludes]
     hits: list[Hit] = []
     for note in notes:
         text = note.text
@@ -256,7 +304,8 @@ def search(notes: list[Note], query: Query, fuzzy: bool = False) -> list[Hit]:
         total = 0
         first: int | None = None
         for pattern in positive:
-            found = [m.start() for m in pattern.finditer(text)]
+            # A regex can still match empty text in some places (lookarounds).
+            found = [m.start() for m in pattern.finditer(text) if m.end() > m.start()]
             if not found:
                 break
             total += len(found)

@@ -97,6 +97,43 @@ def test_search_fuzzy_json_and_highlight(vault, capsys):
     assert HIGHLIGHT_ON + "bread" in colored
 
 
+def test_search_short_w_flag_is_an_option_not_an_exclusion(vault, capsys):
+    # -w right after "search" must not be read as excluding the word "w".
+    code, out, _ = run(capsys, "search", "-w", "tomato", "-C", str(vault), "--color", "never")
+    assert code == 0 and len(out.splitlines()) == 2
+    code, out, err = run(capsys, "search", "tomat", "-w", "-C", str(vault))
+    assert code == 1 and "no notes matched" in err
+
+
+def test_search_word_and_regex_json(vault, capsys):
+    _, out, _ = run(capsys, "search", "--regex", "--word", "past[a-z]", "-C", str(vault), "--json")
+    data = json.loads(out)
+    assert data["query"]["whole_word"] is True and data["query"]["regex"] is True
+    assert [(r["path"], r["matches"]) for r in data["results"]] == [
+        ("pasta.md", 3), ("ideas/todo.md", 1),
+    ]
+    # Whole-word regex: "pas[a-z]" would need a four-letter word.
+    code, _, _ = run(capsys, "search", "--regex", "-w", "pas[a-z]", "-C", str(vault))
+    assert code == 1
+    _, out, _ = run(capsys, "search", "tomato", "-C", str(vault), "--json")
+    assert "regex" not in json.loads(out)["query"]
+
+
+def test_search_regex_highlights_the_regex_match(vault, capsys):
+    _, out, _ = run(capsys, "search", "--regex", "r[a-z]e", "-C", str(vault), "--color", "always")
+    assert HIGHLIGHT_ON + "Rye" in out
+
+
+@pytest.mark.parametrize("args, message", [
+    (["--regex", "tomato("], "invalid regex 'tomato('"),
+    (["--regex", "a?"], "matches empty text"),
+    (["--regex", "--fuzzy", "tomato"], "can't be combined"),
+])
+def test_search_bad_regex_exit_2(vault, capsys, args, message):
+    code, out, err = run(capsys, "search", *args, "-C", str(vault))
+    assert code == 2 and out == "" and message in err
+
+
 def test_color_always_highlights_and_never_does_not(vault, capsys):
     _, colored, _ = run(capsys, "search", "basil", "-C", str(vault), "--color", "always")
     assert HIGHLIGHT_ON + "basil" in colored

@@ -7,7 +7,8 @@ plain directories. It does these things:
 
 - **search**: case-insensitive full-text search with AND-ed terms, `"phrases"`,
   `-exclusions` and `tag:` filters, optional typo tolerance (`--fuzzy`),
-  ranked by number of matches, with the matching line shown and highlighted;
+  whole-word (`-w`) and regular expression (`--regex`) modes, ranked by
+  number of matches, with the matching line shown and highlighted;
 - **tags**: list every tag (front matter and inline `#tags`) with note counts;
 - **links**: find broken `[[wiki links]]` and relative `[markdown](links.md)`,
   including `#Heading` and `#^block` anchors that don't exist;
@@ -52,7 +53,8 @@ The output below is real output from the made-up notes in
 ### search
 
 ```
-notefind search QUERY... [-C FOLDER] [--limit N] [--json] [--fuzzy] [--color auto|always|never]
+notefind search QUERY... [-C FOLDER] [--limit N] [--json] [--fuzzy] [-w] [--regex]
+                [--color auto|always|never]
 ```
 
 | Query               | Meaning                                         |
@@ -173,11 +175,65 @@ $ notefind search wartering --fuzzy --limit 1 --json
 }
 ```
 
+#### Whole words: `-w` and regular expressions: `--regex`
+
+With `-w` (`--word`), terms, phrases and `-exclusions` only match whole words:
+the match can't have a letter, digit or underscore right before or after it.
+Plain `tomato` also finds "Tomatoes"; `-w tomato` doesn't:
+
+```console
+$ notefind search tomato -w
+Compost.md:13: Tomato vines go in the green pile, but not if they had blight.
+Seed Order.md:8: | Cherry tomato   | 2       |
+2 notes matched
+```
+
+This works for terms with symbols at the edges too: `-w c++` doesn't match
+"c++11", and `-w "#todo"` doesn't match "#todos".
+
+With `--regex`, terms, phrases and `-exclusions` are Python regular
+expressions, still case-insensitive. `^` and `$` match at the start and end of
+each line. `tag:` filters stay as they are. Quote patterns so the shell leaves
+them alone; leading and trailing spaces are dropped, so use `\s` for those.
+List items that contain a wiki link:
+
+```console
+$ notefind search --regex '^- .*\[\['
+Garden Plan.md:10: - Order seeds by March (see [[Seed Order]])
+projects/Reading List.md:6: - "The Well-Tended Perennial Garden" - recommended in [[Garden Plan]]
+2 notes matched
+```
+
+Wiki links with a `#heading` or `#^block` anchor:
+
+```console
+$ notefind search --regex '\[\[[^]|]+#'
+projects/watering.md:7: Bed layout: [[Garden Plan#Beds]]. Last frost: [[2026-05-02#^frost]].
+Garden Plan.md:11: - Compost notes live in [[Compost#Ratios|the compost note]]
+2 notes matched
+```
+
+The two combine: `--regex -w 'beds?'` finds "bed" and "beds" but not
+"embedded". An invalid pattern, or one that matches empty text (such as `x*`,
+which would match every note), is an error with exit code 2. `--regex` can't
+be combined with `--fuzzy`.
+
+```console
+$ notefind search --regex 'tomato('
+notefind: invalid regex 'tomato(': missing ), unterminated subpattern at position 6
+$ echo $?
+2
+```
+
+In `--json` output the query gets `"whole_word": true` and `"regex": true`
+when those modes are on.
+
 #### Options and exclusions
 
 Any argument that starts with a single `-` and isn't one of the options
-(`-C`, `-h`) is an exclusion, so `notefind search pasta -tomato` just works.
-Use `--` if a term would otherwise look like an option.
+(`-C`, `-h`, `-w`) is an exclusion, so `notefind search pasta -tomato` just works.
+Use `--` if a term would otherwise look like an option, or `-"w"` to exclude
+the word "w".
 
 JSON output:
 

@@ -5,6 +5,7 @@ from notefind.search import (
     HIGHLIGHT_OFF,
     HIGHLIGHT_ON,
     FuzzyTerm,
+    QueryError,
     compile_pattern,
     edit_distance,
     highlight,
@@ -225,3 +226,93 @@ def test_words_pattern_highlights_whole_words_only():
     out = highlight("Tomatoes, tomatoey", [pattern], color=True)
     assert out == f"{HIGHLIGHT_ON}Tomatoes{HIGHLIGHT_OFF}, tomatoey"
     assert words_pattern([]) is None
+
+
+# --- whole words and regex -------------------------------------------------
+
+def test_whole_word_pattern_rejects_parts_of_longer_words():
+    p = compile_pattern("tomato", whole_word=True)
+    assert p.findall("Tomato, tomatoes, cherry-tomato, tomato_2, (tomato)") == [
+        "Tomato", "tomato", "tomato",
+    ]
+
+
+def test_whole_word_works_for_terms_with_symbols_at_the_edges():
+    assert compile_pattern("c++", whole_word=True).findall("c++ and c++11") == ["c++"]
+    assert compile_pattern("#todo", whole_word=True).findall("a #todo, #todos") == ["#todo"]
+
+
+def test_whole_word_phrase_still_matches_across_whitespace():
+    p = compile_pattern("full sun", whole_word=True)
+    assert p.search("needs full\n  sun.")
+    assert not p.search("full sunlight")
+
+
+def test_search_whole_word_terms_and_exclusions():
+    notes = [
+        note("a.md", "One tomato plant."),
+        note("b.md", "Lots of tomatoes."),
+        note("c.md", "A tomato next to the cart."),
+    ]
+    hits = search(notes, parse_query(["tomato"]), whole_word=True)
+    assert [h.path for h in hits] == ["a.md", "c.md"]
+    # -car only drops whole-word "car", so "cart" doesn't count.
+    hits = search(notes, parse_query(["tomato", "-car"]), whole_word=True)
+    assert [h.path for h in hits] == ["a.md", "c.md"]
+    hits = search(notes, parse_query(["tomato", "-cart"]), whole_word=True)
+    assert [h.path for h in hits] == ["a.md"]
+
+
+def test_whole_word_fuzzy_still_tolerates_typos_but_not_substrings():
+    notes = [note("a.md", "Tomatoes here."), note("b.md", "A tomatoey sauce.")]
+    hits = search(notes, parse_query(["tomatos"]), fuzzy=True, whole_word=True)
+    assert [(h.path, h.fuzzy_words) for h in hits] == [("a.md", ["tomatoes"])]
+    # Without typos, -w with --fuzzy matches the word itself, not "tomatoey".
+    hits = search(notes, parse_query(["tomato"]), fuzzy=True, whole_word=True)
+    assert [h.path for h in hits] == []
+    term = FuzzyTerm("tomato", whole_word=True)
+    assert term.is_close("tomatos") and not term.is_close("tomato")
+
+
+def test_regex_terms_are_case_insensitive_and_counted():
+    notes = [note("a.md", "Order 12 seeds, then 30 more.\nOrder soil."), note("b.md", "No digits")]
+    hits = search(notes, parse_query([r"\d+", "order"]), regex=True)
+    assert [(h.path, h.matches, h.line) for h in hits] == [("a.md", 4, 1)]
+
+
+def test_regex_anchors_match_at_line_boundaries():
+    notes = [note("a.md", "# Title\n- [ ] buy seeds\n- [x] plant"), note("b.md", "text - [ ] inline")]
+    hits = search(notes, parse_query([r"^- \[ \]"]), regex=True)
+    assert [(h.path, h.line, h.snippet) for h in hits] == [("a.md", 2, "- [ ] buy seeds")]
+
+
+def test_regex_exclusion_and_whole_word_together():
+    notes = [note("a.md", "basil 2026-05-02"), note("b.md", "basil 2026-5-2"), note("c.md", "basils")]
+    hits = search(notes, parse_query(["basil", r"-\d{4}-\d\d-\d\d"]), regex=True, whole_word=True)
+    assert [h.path for h in hits] == ["b.md"]
+
+
+def test_regex_is_off_by_default():
+    notes = [note("a.md", "costs 1+1 dollars"), note("b.md", "costs 11 dollars")]
+    assert [h.path for h in search(notes, parse_query(["1+1"]))] == ["a.md"]
+    assert [h.path for h in search(notes, parse_query(["1+1"]), regex=True)] == ["b.md"]
+
+
+@pytest.mark.parametrize("bad, message", [
+    ("tomato(", "invalid regex"),
+    ("x*", "matches empty text"),
+    ("^", "matches empty text"),
+])
+def test_bad_regexes_raise_query_error(bad, message):
+    with pytest.raises(QueryError, match=message):
+        compile_pattern(bad, regex=True)
+
+
+def test_regex_lookaround_zero_width_matches_are_not_counted():
+    notes = [note("a.md", "plain text")]
+    assert search(notes, parse_query(["(?=text)"]), regex=True) == []
+
+
+def test_fuzzy_and_regex_cannot_be_combined():
+    with pytest.raises(QueryError, match="can't be combined"):
+        search([note("a.md", "x")], parse_query(["x"]), fuzzy=True, regex=True)
