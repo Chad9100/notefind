@@ -605,8 +605,8 @@ rewrote 3 links in 2 notes
 
 Renames a note and rewrites every link to it, so nothing breaks. `OLD` is
 found like the `backlinks` argument (name, file name or path). `NEW` is a file
-name without a folder: the note stays where it is, and a bare name keeps the
-old extension. Links keep their style: bare wiki names stay bare, path-style
+name (the note stays in its folder; a bare name keeps the old extension) or a
+path to move it, see below. Links keep their style: bare wiki names stay bare, path-style
 ones stay paths, aliases, `#anchors`, `?queries`, `./`, a leading `/`,
 `%20` escapes, `<...>` brackets, line endings and a BOM are kept, and code
 is never touched. A bare wiki name becomes a path only if another note already
@@ -638,7 +638,34 @@ would rename Garden Plan.md -> Garden Layout.md
 would rewrite 2 links in 2 notes
 ```
 
-Moving a note to another folder is not supported yet.
+#### Moving a note to another folder
+
+Give `NEW` a path relative to the notes folder to move the note: `archive/Plan`
+(extension optional), or `archive/` to keep the file name. Missing folders are
+created, `..`, hidden folders and a leading `/` are refused, and an existing
+target is refused as before. Links to the note are rewritten to the new
+location (relative links are recomputed from each note's own folder, `/root`
+links stay root-based, bare `[[wiki]]` names stay as they are), and the moved
+note's own relative links (to other notes, images and files) are rewritten so
+they still point at the same files. Links that point outside the notes folder
+are left alone. `--dry-run` and `--diff` work the same way.
+
+```console
+$ notefind rename "Garden Plan" "projects/Garden Plan" --dry-run --diff
+would rename Garden Plan.md -> projects/Garden Plan.md
+--- a/daily/today.md
++++ b/daily/today.md
+@@ -1 +1 @@
+-Today: [[Garden Plan]] and [plan](../Garden%20Plan.md#beds)
++Today: [[Garden Plan]] and [plan](../projects/Garden%20Plan.md#beds)
+--- a/Garden Plan.md
++++ b/projects/Garden Plan.md
+@@ -1,2 +1,2 @@
+ # Beds
+-See [the log](daily/today.md)
++See [the log](../daily/today.md)
+would rewrite 2 links in 2 notes
+```
 
 ### orphans
 

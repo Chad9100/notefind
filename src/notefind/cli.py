@@ -198,14 +198,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="rename a note and rewrite the links to it",
         description=(
             "Rename note OLD (a name, file name or path, as for backlinks) to "
-            "NEW, a file name without a folder: the note stays where it is. "
-            "Every wiki and Markdown link to it is rewritten in the style it "
-            "was written in. Links that reach the note only through a name "
-            "other notes share are left alone and listed."
+            "NEW: a bare file name renames it in place, a path such as "
+            "archive/Plan (or a folder ending in /) moves it, creating "
+            "folders as needed. Every wiki and Markdown link to it is "
+            "rewritten in the style it was written in, and a moved note's own "
+            "relative links are adjusted. Links that reach the note only "
+            "through a name other notes share are left alone and listed."
         ),
     )
-    p.add_argument("old", metavar="OLD", help="the note to rename")
-    p.add_argument("new", metavar="NEW", help="its new name (extension optional)")
+    p.add_argument("old", metavar="OLD", help="the note to rename or move")
+    p.add_argument("new", metavar="NEW",
+                   help="its new name or path relative to the notes folder (extension optional)")
     _add_folder(p)
     p.add_argument("--json", action="store_true", help="print JSON")
     p.add_argument(
