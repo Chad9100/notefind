@@ -1,4 +1,4 @@
-"""Command-line interface: notefind search | tags | links | backlinks | orphans | report | watch."""
+"""Command-line interface: notefind search | tags | links | backlinks | orphans | rename | report | watch."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from .config import ConfigError, command_defaults, load_config
 from .fix import fix_links
 from .linkcheck import find_broken_links
 from .parse import extract_tags
+from .rename import RenameError, apply_rename, plan_rename
 from .report import render_report
 from .scan import load_notes, walk_files
 from . import watch as watching
@@ -191,6 +192,26 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("note", metavar="NOTE", help="the note to find links to")
     _add_folder(p)
     p.add_argument("--json", action="store_true", help="print JSON")
+
+    p = sub.add_parser(
+        "rename",
+        help="rename a note and rewrite the links to it",
+        description=(
+            "Rename note OLD (a name, file name or path, as for backlinks) to "
+            "NEW, a file name without a folder: the note stays where it is. "
+            "Every wiki and Markdown link to it is rewritten in the style it "
+            "was written in. Links that reach the note only through a name "
+            "other notes share are left alone and listed."
+        ),
+    )
+    p.add_argument("old", metavar="OLD", help="the note to rename")
+    p.add_argument("new", metavar="NEW", help="its new name (extension optional)")
+    _add_folder(p)
+    p.add_argument("--json", action="store_true", help="print JSON")
+    p.add_argument(
+        "--dry-run", action="store_true",
+        help="show what would change without renaming or writing anything",
+    )
 
     p = sub.add_parser(
         "orphans",
@@ -418,6 +439,51 @@ def _cmd_backlinks(args: argparse.Namespace, root: Path) -> int:
     return 0 if found else 1
 
 
+def _cmd_rename(args: argparse.Namespace, root: Path) -> int:
+    files = walk_files(root, use_ignore=not args.no_ignore)
+    notes = load_notes(root, files, jobs=args.jobs)
+    matches = NoteResolver(notes).by_name(args.old)
+    if len(matches) != 1:
+        if matches:
+            print(f"notefind: {args.old!r} matches {len(matches)} notes; "
+                  "give its path instead:", file=sys.stderr)
+            for rel in matches:
+                print(f"  {rel}", file=sys.stderr)
+        else:
+            print(f"notefind: no note named {args.old!r}", file=sys.stderr)
+        return 2
+    try:
+        plan = plan_rename(root, notes, files, matches[0], args.new)
+        fixes = apply_rename(root, plan, write=not args.dry_run)
+    except (RenameError, OSError) as exc:
+        print(f"notefind: {exc}", file=sys.stderr)
+        return 2
+    if args.json:
+        payload = {
+            "dry_run": args.dry_run,
+            "renamed": {"from": plan.old, "to": plan.new},
+            "rewritten": [
+                {"path": f.path, "line": f.line, "kind": f.kind, "old": f.old, "new": f.new}
+                for f in fixes
+            ],
+            "skipped": [{"path": s.path, "line": s.line, "link": s.link} for s in plan.skipped],
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 0
+    print(f"{'would rename' if args.dry_run else 'renamed'} {plan.old} -> {plan.new}")
+    for f in fixes:
+        print(f"{f.path}:{f.line}: {f.old} -> {f.new}")
+    sys.stdout.flush()
+    for s in plan.skipped:
+        print(f"{s.path}:{s.line}: left alone, {s.link!r} also matches other notes",
+              file=sys.stderr)
+    count = f"{len(fixes)} link{'' if len(fixes) == 1 else 's'}"
+    notes_hit = len({f.path for f in fixes})
+    where = f" in {notes_hit} note{'' if notes_hit == 1 else 's'}" if fixes else ""
+    print(f"{'would rewrite' if args.dry_run else 'rewrote'} {count}{where}", file=sys.stderr)
+    return 0
+
+
 def _cmd_orphans(args: argparse.Namespace, root: Path) -> int:
     notes = load_notes(root, jobs=args.jobs, use_ignore=not args.no_ignore)
     lonely = orphans(notes, link_edges(notes))
@@ -567,6 +633,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_backlinks(args, root)
     if args.command == "orphans":
         return _cmd_orphans(args, root)
+    if args.command == "rename":
+        return _cmd_rename(args, root)
     if args.command == "report":
         return _cmd_report(args, root)
     return _cmd_links(args, root)

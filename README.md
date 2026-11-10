@@ -17,6 +17,7 @@ plain directories. It does these things:
   did-you-mean suggestions and `--fix` to apply the unambiguous ones;
 - **backlinks**: list the notes that link to a given note;
 - **orphans**: list notes that nothing links to;
+- **rename**: rename a note and rewrite every link to it, with `--dry-run`;
 - **report**: write a single-file HTML page with broken links, tags and orphans;
 - **watch**: re-run any of the above whenever a note changes.
 
@@ -587,6 +588,35 @@ notes in several folders, `backlinks` lists them and asks for a path instead
 (exit code 2). It exits with 1 when nothing links to the note. `--json` prints
 `{"note": ..., "backlinks": [{"path", "line", "kind", "link"}, ...]}`.
 
+### rename
+
+```console
+$ notefind rename "Garden Plan" "Garden Layout" --dry-run
+would rename Garden Plan.md -> Garden Layout.md
+Garden Layout.md:2: Garden Plan#Beds -> Garden Layout#Beds
+daily/today.md:1: Garden Plan -> Garden Layout
+daily/today.md:1: ../Garden%20Plan.md#beds -> ../Garden%20Layout.md#beds
+would rewrite 3 links in 2 notes
+$ notefind rename "Garden Plan" "Garden Layout"
+renamed Garden Plan.md -> Garden Layout.md
+...
+rewrote 3 links in 2 notes
+```
+
+Renames a note and rewrites every link to it, so nothing breaks. `OLD` is
+found like the `backlinks` argument (name, file name or path). `NEW` is a file
+name without a folder: the note stays where it is, and a bare name keeps the
+old extension. Links keep their style: bare wiki names stay bare, path-style
+ones stay paths, aliases, `#anchors`, `?queries`, `./`, a leading `/`,
+`%20` escapes, `<...>` brackets, line endings and a BOM are kept, and code
+is never touched. A bare wiki name becomes a path only if another note already
+has the new name. A link that reached the note only through a name several
+notes share (`[[Plan]]` with `a/Plan.md` and `b/Plan.md`) is left alone and
+listed on stderr. `--dry-run` lists the rewrites and changes nothing. It
+refuses (exit code 2) when `OLD` is unknown or ambiguous, or `NEW` exists.
+`--json` prints `{"dry_run", "renamed": {"from", "to"}, "rewritten": [...],
+"skipped": [...]}`. Moving a note to another folder is not supported yet.
+
 ### orphans
 
 ```console
@@ -770,6 +800,7 @@ src/notefind/
   linkcheck.py  resolving wiki and Markdown links and their anchors
   suggest.py    closest note, file or heading for links --suggest
   graph.py      backlinks and orphans
+  rename.py     planning and applying a note rename with its link rewrites
   report.py     the HTML page for the report command
   watch.py      polling snapshots for the watch command
   cli.py        argparse front end
