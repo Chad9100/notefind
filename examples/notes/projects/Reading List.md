@@ -1,5 +1,6 @@
 ---
 tags: [reading]
+status: draft
 ---
 # Reading list
 

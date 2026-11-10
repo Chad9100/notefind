@@ -6,14 +6,32 @@ import re
 from dataclasses import dataclass, field
 from typing import Sequence
 
-from .parse import clean_tag, extract_tags, split_front_matter
+from .anchors import ATX_RE, heading_text
+from .parse import clean_tag, extract_tags, front_matter_fields, split_front_matter, strip_code
 from .scan import Note
 
-TOKEN_RE = re.compile(r'(-?)(?:"([^"]*)"?|(\S+))')
+# A token: an optional "-", then "a phrase", key:"quoted value" or a word.
+TOKEN_RE = re.compile(r'(-?)(?:"([^"]*)"?|([A-Za-z][\w-]*:"[^"]*"?)|(\S+))')
+# A field filter: key:value with a key that starts with a letter. The value
+# may not start with "/" (so URLs like https://example.com stay terms) or a
+# space (so "note: buy milk" stays a phrase).
+FIELD_RE = re.compile(r'([A-Za-z][\w-]*):(?![/\s])(.+)')
 HIGHLIGHT_ON = "\x1b[1;31m"
 HIGHLIGHT_OFF = "\x1b[0m"
 SNIPPET_WIDTH = 100
 WORD_RE = re.compile(r"\w+")
+
+
+@dataclass(frozen=True)
+class FieldFilter:
+    """A `key:value` filter. ``path`` and ``title`` match a substring of the
+    note's path or title; any other key matches a front matter value."""
+
+    key: str  # lowercased
+    value: str
+
+    def __str__(self) -> str:
+        return f"{self.key}:{self.value}"
 
 
 @dataclass
@@ -23,13 +41,15 @@ class Query:
     excludes: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     exclude_tags: list[str] = field(default_factory=list)
+    fields: list[FieldFilter] = field(default_factory=list)
+    exclude_fields: list[FieldFilter] = field(default_factory=list)
 
     @property
     def positive(self) -> list[str]:
         return self.terms + self.phrases
 
     def is_empty(self) -> bool:
-        return not (self.terms or self.phrases or self.tags)
+        return not (self.terms or self.phrases or self.tags or self.fields)
 
 
 @dataclass
@@ -47,10 +67,20 @@ def _add(query: Query, text: str, negative: bool, quoted: bool) -> None:
     text = " ".join(text.split())
     if not text or text == "-":
         return
-    if not quoted and text.lower().startswith("tag:"):
-        name = clean_tag(text[4:])
-        if name:
-            (query.exclude_tags if negative else query.tags).append(name)
+    m = None if quoted else FIELD_RE.fullmatch(text)
+    if m:
+        key, value = m.group(1).lower(), m.group(2)
+        if key in ("tag", "tags"):
+            name = clean_tag(value)
+            if name:
+                (query.exclude_tags if negative else query.tags).append(name)
+            return
+        value = value.strip()
+        if len(value) >= 2 and value[0] == '"':
+            value = value.strip('"').strip()
+        if value:
+            target = query.exclude_fields if negative else query.fields
+            target.append(FieldFilter(key, value))
         return
     if negative:
         query.excludes.append(text)
@@ -66,7 +96,11 @@ def parse_query(parts: str | Sequence[str]) -> Query:
     - plain words are ANDed;
     - "quoted text" (or a single shell argument containing spaces) is a phrase;
     - -word / -"some phrase" excludes notes containing it;
-    - tag:name keeps only notes with that tag, -tag:name drops them.
+    - tag:name keeps only notes with that tag, -tag:name drops them;
+    - path:text / title:text keep notes whose path / title contains text,
+      key:value keeps notes whose front matter has key set to value
+      (key:"two words" for spaces); a leading "-" drops them instead.
+      Quote the whole token ("status:done") to search for it as text.
     """
     if isinstance(parts, str):
         parts = [parts]
@@ -77,12 +111,15 @@ def parse_query(parts: str | Sequence[str]) -> Query:
             continue
         if '"' not in s and re.search(r"\s", s):
             # The shell already removed the quotes: treat the argument as a phrase.
+            # "status:in progress" (the shell ate the quotes) is still a
+            # field filter; "note: buy milk" is a phrase.
             negative = s.startswith("-")
-            _add(query, s[1:] if negative else s, negative, quoted=True)
+            _add(query, s[1:] if negative else s, negative, quoted=False)
             continue
         for m in TOKEN_RE.finditer(s):
             quoted = m.group(2) is not None
-            _add(query, m.group(2) if quoted else m.group(3), m.group(1) == "-", quoted)
+            text = m.group(2) if quoted else (m.group(3) or m.group(4))
+            _add(query, text, m.group(1) == "-", quoted)
     return query
 
 
@@ -209,6 +246,44 @@ def words_pattern(words: list[str]) -> re.Pattern[str] | None:
     return re.compile(_words_alternation(words), re.IGNORECASE)
 
 
+def note_title(note: Note) -> str:
+    """A note's title: its front matter ``title``, else its first level-1
+    heading (outside code blocks), else its file name without extension."""
+    fm, body_start = split_front_matter(note.lines)
+    title = front_matter_fields(fm).get("title")
+    if title:
+        return title[0]
+    for line in strip_code(note.lines[body_start:]):
+        m = ATX_RE.match(line)
+        if m and len(m.group(1)) == 1 and m.group(2):
+            text = heading_text(m.group(2))
+            if text:
+                return text
+    name = note.rel.rsplit("/", 1)[-1]
+    return name.rsplit(".", 1)[0]
+
+
+class _FieldView:
+    """Lazily computed path, title and front matter of one note."""
+
+    def __init__(self, note: Note) -> None:
+        self.note = note
+        self._title: str | None = None
+        self._fm: dict[str, list[str]] | None = None
+
+    def matches(self, f: FieldFilter) -> bool:
+        wanted = f.value.casefold()
+        if f.key == "path":
+            return wanted in self.note.rel.casefold()
+        if f.key == "title":
+            if self._title is None:
+                self._title = note_title(self.note)
+            return wanted in self._title.casefold()
+        if self._fm is None:
+            self._fm = front_matter_fields(split_front_matter(self.note.lines)[0])
+        return any(v.casefold() == wanted for v in self._fm.get(f.key, []))
+
+
 def _has_tag(tags: set[str], wanted: str) -> bool:
     # tag:project also matches nested tags such as project/alpha.
     return wanted in tags or any(t.startswith(wanted + "/") for t in tags)
@@ -269,7 +344,8 @@ def search(
     """Return matching notes, most matches first, ties broken by path.
 
     With ``fuzzy``, each plain term also matches whole words within its typo
-    budget (see ``typo_budget``). Phrases, exclusions and tags stay exact.
+    budget (see ``typo_budget``). Phrases, exclusions, tags and field
+    filters stay exact.
     With ``whole_word``, terms, phrases and exclusions only match whole words.
     With ``regex``, they are regular expressions (see ``compile_pattern``);
     it can't be combined with ``fuzzy``. Raises QueryError for a bad regex.
@@ -287,6 +363,12 @@ def search(
         text = note.text
         if any(p.search(text) for p in negative):
             continue
+        if query.fields or query.exclude_fields:
+            view = _FieldView(note)
+            if not all(view.matches(f) for f in query.fields):
+                continue
+            if any(view.matches(f) for f in query.exclude_fields):
+                continue
         if query.tags or query.exclude_tags:
             tags = extract_tags(text)
             if not all(_has_tag(tags, t) for t in query.tags):

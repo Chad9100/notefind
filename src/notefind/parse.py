@@ -83,6 +83,52 @@ def clean_tag(raw: str) -> str:
     return tag.lower()
 
 
+# A top-level front matter key: "status: done", "aliases:" (block list follows).
+FM_KEY_RE = re.compile(r"^([A-Za-z_][\w-]*)[ \t]*:(?:[ \t]+(.*?))?[ \t]*$")
+
+
+def _unquote(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+        value = value[1:-1].strip()
+    return value
+
+
+def front_matter_fields(fm_lines: list[str]) -> dict[str, list[str]]:
+    """Simple YAML front matter as {lowercased key: [values]}.
+
+    Handles the shapes notes actually use: `key: value` (quotes dropped),
+    `key: [a, b]` and a `key:` line followed by `- item` lines. Nested maps
+    and multi-line strings are skipped; a key with no value gets no values.
+    The first occurrence of a key wins.
+    """
+    fields: dict[str, list[str]] = {}
+    i = 0
+    while i < len(fm_lines):
+        m = FM_KEY_RE.match(fm_lines[i])
+        i += 1
+        if not m:
+            continue
+        value = (m.group(2) or "").strip()
+        items: list[str] = []
+        if value.startswith("[") and value.endswith("]"):
+            items = [_unquote(v) for v in value[1:-1].split(",")]
+        elif value:
+            if value[0] not in "|>":
+                items = [_unquote(value)]
+        else:
+            while i < len(fm_lines):
+                line = fm_lines[i]
+                item = LIST_ITEM_RE.match(line)
+                if item:
+                    items.append(_unquote(item.group(1)))
+                elif line.strip() and not line[0].isspace():
+                    break
+                i += 1
+        fields.setdefault(m.group(1).lower(), [v for v in items if v])
+    return fields
+
+
 def front_matter_tags(fm_lines: list[str]) -> list[str]:
     """Tags from `tags: [a, b]`, `tags: a, b` or a `tags:` block of `- a` lines."""
     tags: list[str] = []

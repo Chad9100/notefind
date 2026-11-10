@@ -85,7 +85,10 @@ def build_parser() -> argparse.ArgumentParser:
         description=(
             'Case-insensitive full-text search. Terms are ANDed; "a phrase" '
             "matches a phrase; -word excludes notes containing it; tag:name "
-            "keeps notes with that tag (-tag:name drops them)."
+            "keeps notes with that tag (-tag:name drops them); path:text and "
+            "title:text keep notes whose path or title contains text; "
+            "key:value keeps notes whose front matter key has that value "
+            "(-path:, -title:, -key: drop them)."
         ),
     )
     p.add_argument("query", nargs="*", metavar="QUERY", help="search terms")
@@ -157,7 +160,7 @@ def build_parser() -> argparse.ArgumentParser:
 def _cmd_search(args: argparse.Namespace, root: Path) -> int:
     query = parse_query(args.query)
     if query.is_empty():
-        print("notefind: search needs at least one term, phrase or tag:", file=sys.stderr)
+        print("notefind: search needs at least one term, phrase, tag: or field filter", file=sys.stderr)
         return 2
     opts = {"whole_word": args.word, "regex": args.regex}
     try:
@@ -177,6 +180,8 @@ def _cmd_search(args: argparse.Namespace, root: Path) -> int:
                 "exclude": query.excludes,
                 "tags": query.tags,
                 "exclude_tags": query.exclude_tags,
+                "fields": [str(f) for f in query.fields],
+                "exclude_fields": [str(f) for f in query.exclude_fields],
                 **({"fuzzy": True} if args.fuzzy else {}),
                 **({"whole_word": True} if args.word else {}),
                 **({"regex": True} if args.regex else {}),

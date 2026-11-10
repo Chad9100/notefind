@@ -27,7 +27,7 @@ Estimates are rough working hours for one person, including tests and docs.
 
 - [x] Fuzzy matching (`--fuzzy`) with a typo tolerance based on edit distance (3 h)
 - [x] Whole-word mode (`-w`) and regex mode (`--regex`) (2 h)
-- [ ] Field filters: `path:daily/`, `title:`, front matter keys (`status:done`) (2 h)
+- [x] Field filters: `path:daily/`, `title:`, front matter keys (`status:done`) (2 h)
 - [ ] Show every matching line per note with `--all-lines` (1 h)
 
 ## v0.4 - big vaults (about 7 h)

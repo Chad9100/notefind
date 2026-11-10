@@ -1,5 +1,6 @@
 ---
 tags: garden, shopping
+status: done
 ---
 # Seed Order
 

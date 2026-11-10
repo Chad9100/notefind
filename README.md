@@ -6,7 +6,8 @@ Search and check a folder of Markdown notes from the command line.
 plain directories. It does these things:
 
 - **search**: case-insensitive full-text search with AND-ed terms, `"phrases"`,
-  `-exclusions` and `tag:` filters, optional typo tolerance (`--fuzzy`),
+  `-exclusions`, `tag:` filters and `path:` / `title:` / front matter field
+  filters (`status:done`), optional typo tolerance (`--fuzzy`),
   whole-word (`-w`) and regular expression (`--regex`) modes, ranked by
   number of matches, with the matching line shown and highlighted;
 - **tags**: list every tag (front matter and inline `#tags`) with note counts;
@@ -65,6 +66,10 @@ notefind search QUERY... [-C FOLDER] [--limit N] [--json] [--fuzzy] [-w] [--rege
 | `-"cream sauce"`    | drop notes containing the phrase               |
 | `tag:garden`        | only notes tagged `garden` (or `garden/...`)    |
 | `-tag:draft`        | drop notes tagged `draft`                       |
+| `path:daily/`       | only notes whose path contains `daily/`         |
+| `title:plan`        | only notes whose title contains "plan"          |
+| `status:done`       | only notes with `status: done` in front matter  |
+| `-status:done`      | drop notes with `status: done`                  |
 
 Matching is case-insensitive substring matching. Results are ranked by the
 total number of matches, ties broken by path, and show `path:line:` plus the
@@ -77,7 +82,7 @@ nothing did.
 $ notefind search tomato
 Garden Plan.md:7: Raised beds go along the south fence. Tomatoes need full sun, so they get
 Compost.md:13: Tomato vines go in the green pile, but not if they had blight.
-Seed Order.md:8: | Cherry tomato   | 2       |
+Seed Order.md:9: | Cherry tomato   | 2       |
 daily/2026-05-02.md:3: Planted the cherry tomatoes and basil today. Covered the lettuce
 projects/watering.md:3: Water tomatoes deeply twice a week; basil likes lighter, more frequent
 5 notes matched
@@ -88,7 +93,7 @@ projects/watering.md:3: Water tomatoes deeply twice a week; basil likes lighter,
 ```console
 $ notefind search tomato basil -blight
 Garden Plan.md:7: Raised beds go along the south fence. Tomatoes need full sun, so they get
-Seed Order.md:8: | Cherry tomato   | 2       |
+Seed Order.md:9: | Cherry tomato   | 2       |
 daily/2026-05-02.md:3: Planted the cherry tomatoes and basil today. Covered the lettuce
 projects/watering.md:3: Water tomatoes deeply twice a week; basil likes lighter, more frequent
 4 notes matched
@@ -99,7 +104,7 @@ Garden Plan.md:7: Raised beds go along the south fence. Tomatoes need full sun, 
 
 $ notefind search tag:soil
 Compost.md:6: # Compost
-projects/Reading List.md:4: # Reading list
+projects/Reading List.md:5: # Reading list
 2 notes matched
 
 $ notefind search zucchini
@@ -107,6 +112,53 @@ no notes matched
 $ echo $?
 1
 ```
+
+#### Field filters: `path:`, `title:` and front matter keys
+
+A `key:value` word filters notes instead of searching their text:
+
+- `path:text` keeps notes whose path (relative to the notes folder, with `/`)
+  contains `text`, so `path:daily/` means "in the daily folder";
+- `title:text` keeps notes whose title contains `text`. The title is the
+  front matter `title:`, else the first `# Heading`, else the file name;
+- any other key, such as `status:done`, keeps notes whose front matter has
+  that key set to exactly that value, or to a list that contains it
+  (`status: [active, review]` or a `- review` block list). Use
+  `status:"in progress"` for values with spaces.
+
+All of them ignore case, combine with terms, tags and each other, and a
+leading `-` drops matching notes instead (`-status:done` keeps notes that have
+no `status` at all). They stay exact with `--fuzzy`, `-w` and `--regex`.
+`tag:` / `tags:` are the tag filter described above. A word with a key that
+doesn't start with a letter (`06:00`), an empty value (`todo:`) or a value
+starting with `/` (`https://...`) is a normal search term; quote the whole
+word (`'"status:done"'`) to search for it as text.
+
+In `examples/notes`, `Seed Order.md` has `status: done` and
+`projects/Reading List.md` has `status: draft`:
+
+```console
+$ notefind search status:done
+Seed Order.md:5: # Seed Order
+1 note matched
+
+$ notefind search basil -status:done
+Garden Plan.md:8: the bed nearest the shed. Basil goes next to the tomatoes. #companion-planting
+daily/2026-05-02.md:3: Planted the cherry tomatoes and basil today. Covered the lettuce
+projects/watering.md:3: Water tomatoes deeply twice a week; basil likes lighter, more frequent
+3 notes matched
+
+$ notefind search tomato path:projects/
+projects/watering.md:3: Water tomatoes deeply twice a week; basil likes lighter, more frequent
+1 note matched
+
+$ notefind search title:list
+projects/Reading List.md:5: # Reading list
+1 note matched
+```
+
+A filter-only search shows each note's first line. In `--json` output the
+query lists them as `"fields": ["status:done"]` and `"exclude_fields"`.
 
 #### Typos: `--fuzzy`
 
@@ -122,7 +174,7 @@ with the term's length:
 | 8 or more      | 2             |
 
 Exact substring matches still count, so `--fuzzy` only ever adds results.
-Phrases, `-exclusions`, `tag:` filters and terms that aren't a single word
+Phrases, `-exclusions`, `tag:` and field filters and terms that aren't a single word
 (`c++`, `2026-05-02`) stay exact. Typo matches count towards the ranking like
 exact ones and are highlighted too.
 
@@ -133,7 +185,7 @@ no notes matched
 $ notefind search tomatos --fuzzy
 Garden Plan.md:7: Raised beds go along the south fence. Tomatoes need full sun, so they get
 Compost.md:13: Tomato vines go in the green pile, but not if they had blight.
-Seed Order.md:8: | Cherry tomato   | 2       |
+Seed Order.md:9: | Cherry tomato   | 2       |
 daily/2026-05-02.md:3: Planted the cherry tomatoes and basil today. Covered the lettuce
 projects/watering.md:3: Water tomatoes deeply twice a week; basil likes lighter, more frequent
 5 notes matched
@@ -158,6 +210,8 @@ $ notefind search wartering --fuzzy --limit 1 --json
     "exclude": [],
     "tags": [],
     "exclude_tags": [],
+    "fields": [],
+    "exclude_fields": [],
     "fuzzy": true
   },
   "total": 3,
@@ -184,7 +238,7 @@ Plain `tomato` also finds "Tomatoes"; `-w tomato` doesn't:
 ```console
 $ notefind search tomato -w
 Compost.md:13: Tomato vines go in the green pile, but not if they had blight.
-Seed Order.md:8: | Cherry tomato   | 2       |
+Seed Order.md:9: | Cherry tomato   | 2       |
 2 notes matched
 ```
 
@@ -200,7 +254,7 @@ List items that contain a wiki link:
 ```console
 $ notefind search --regex '^- .*\[\['
 Garden Plan.md:10: - Order seeds by March (see [[Seed Order]])
-projects/Reading List.md:6: - "The Well-Tended Perennial Garden" - recommended in [[Garden Plan]]
+projects/Reading List.md:7: - "The Well-Tended Perennial Garden" - recommended in [[Garden Plan]]
 2 notes matched
 ```
 
@@ -249,13 +303,15 @@ $ notefind search pruning tag:reading --json
     "tags": [
       "reading"
     ],
-    "exclude_tags": []
+    "exclude_tags": [],
+    "fields": [],
+    "exclude_fields": []
   },
   "total": 1,
   "results": [
     {
       "path": "projects/Reading List.md",
-      "line": 10,
+      "line": 11,
       "matches": 1,
       "snippet": "- Notes on [[Pruning]] still to write. #todo"
     }
@@ -296,7 +352,7 @@ these, and none show up above.
 ```console
 $ notefind links
 daily/2026-05-02.md:7: broken link -> ../projects/pruning.md
-projects/Reading List.md:10: broken link -> Pruning
+projects/Reading List.md:11: broken link -> Pruning
 projects/watering.md:6: broken link -> ../manuals/timer.md
 projects/watering.md:7: broken link -> Garden Plan#Beds (no heading "Beds" in Garden Plan.md)
 4 broken (12 links checked in 6 notes)
@@ -342,7 +398,7 @@ targets exist:
 ```console
 $ notefind links --no-anchors
 daily/2026-05-02.md:7: broken link -> ../projects/pruning.md
-projects/Reading List.md:10: broken link -> Pruning
+projects/Reading List.md:11: broken link -> Pruning
 projects/watering.md:6: broken link -> ../manuals/timer.md
 3 broken (12 links checked in 6 notes)
 ```
@@ -363,7 +419,7 @@ $ notefind links --json
     },
     {
       "path": "projects/Reading List.md",
-      "line": 10,
+      "line": 11,
       "kind": "wiki",
       "target": "Pruning",
       "reason": "no-file"
@@ -394,8 +450,8 @@ missing anchors.
 
 ```console
 $ notefind backlinks "Garden Plan"
-Seed Order.md:12: -> Garden Plan
-projects/Reading List.md:6: -> Garden Plan
+Seed Order.md:13: -> Garden Plan
+projects/Reading List.md:7: -> Garden Plan
 projects/watering.md:7: -> Garden Plan#Beds
 3 links from 3 notes to Garden Plan.md
 ```
