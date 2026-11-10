@@ -16,7 +16,8 @@ plain directories. It does these things:
   including `#Heading` and `#^block` anchors that don't exist, with
   did-you-mean suggestions and `--fix` to apply the unambiguous ones;
 - **backlinks**: list the notes that link to a given note;
-- **orphans**: list notes that nothing links to.
+- **orphans**: list notes that nothing links to;
+- **watch**: re-run any of the above whenever a note changes.
 
 There is no index and no database. Every run scans the folder, skipping hidden
 directories (`.git`, `.obsidian`, `.trash`, ...) and `node_modules`.
@@ -48,7 +49,7 @@ That puts a `notefind` command on your PATH. `python -m notefind` works too.
 ## Usage
 
 Every command scans the current directory by default; use `-C FOLDER` to point
-it somewhere else. All commands accept `--json`, and `-j N` to choose how many
+it somewhere else. All commands except `watch` accept `--json`, and `-j N` to choose how many
 threads read the notes (see [Files](#files)).
 
 The output below is real output from the made-up notes in
@@ -596,6 +597,41 @@ Notes that no *other* note links to: useful for spotting forgotten notes. It
 always exits with 0, since an orphan isn't an error (daily notes and index pages
 are often orphans on purpose). `--json` prints `{"total_notes": 6, "orphans": [...]}`.
 
+### watch
+
+```
+notefind watch [--interval SECONDS] [--clear] COMMAND [OPTIONS...]
+```
+
+Runs another notefind command, then runs it again every time a file in that
+command's notes folder (its `-C`, or the current directory) is added, removed
+or changed. Handy in a terminal next to your editor while you clean up links.
+Here `daily/today.md` links to `[[Compst]]`, and the typo is fixed while
+watching:
+
+```console
+$ notefind watch links --suggest
+daily/today.md:1: broken link -> Compst (did you mean "Compost"?)
+1 broken (2 links checked in 3 notes)
+notefind: 1 file changed: daily/today.md; running again
+no broken links (2 links checked in 3 notes)
+^C
+notefind: stopped watching
+```
+
+Everything after `watch`'s own options is the command, exactly as you would
+type it (`notefind watch search tomato -blight -C notes` works). Its options
+are checked once at the start, so a typo fails immediately.
+
+- Changes are found by polling file modification times and sizes every
+  `--interval` seconds (default 1), with no extra dependencies. Hidden
+  folders (`.git`, `.obsidian`) and `node_modules` are ignored, like
+  everywhere else.
+- Files the command writes itself, such as `links --fix` rewriting a note,
+  don't trigger another run.
+- `--clear` clears the terminal before each run.
+- Stop with Ctrl-C; the exit code is the one from the last run.
+
 ### Files
 
 Notes are `*.md` and `*.markdown` files. They are read as UTF-8 (a BOM is
@@ -632,6 +668,7 @@ src/notefind/
   linkcheck.py  resolving wiki and Markdown links and their anchors
   suggest.py    closest note, file or heading for links --suggest
   graph.py      backlinks and orphans
+  watch.py      polling snapshots for the watch command
   cli.py        argparse front end
 tests/          pytest suite using throwaway tmp_path note folders
 examples/notes  made-up notes used in this README

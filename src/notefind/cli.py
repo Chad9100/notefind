@@ -1,4 +1,4 @@
-"""Command-line interface: notefind search | tags | links | backlinks | orphans."""
+"""Command-line interface: notefind search | tags | links | backlinks | orphans | watch."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from .fix import fix_links
 from .linkcheck import find_broken_links
 from .parse import extract_tags
 from .scan import load_notes, walk_files
+from . import watch as watching
 from .search import (
     QueryError, compile_pattern, highlight, parse_query, search, words_pattern,
 )
@@ -188,7 +189,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_folder(p)
     p.add_argument("--json", action="store_true", help="print JSON")
+
+    p = sub.add_parser(
+        "watch",
+        help="re-run a command whenever notes change",
+        description=(
+            "Run another notefind command, then run it again each time a file "
+            "in its notes folder is added, removed or changed. Polls file "
+            "times and sizes; stop with Ctrl-C. Example: notefind watch links -C notes"
+        ),
+    )
+    p.add_argument(
+        "--interval", type=_positive_float, default=1.0, metavar="SECONDS",
+        help="how often to check for changes (default 1)",
+    )
+    p.add_argument(
+        "--clear", action="store_true",
+        help="clear the terminal before each run",
+    )
+    p.add_argument(
+        "inner", nargs=argparse.REMAINDER, metavar="COMMAND ...",
+        help="the notefind command to run, with its options",
+    )
     return parser
+
+
+def _positive_float(value: str) -> float:
+    try:
+        n = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {value!r}") from None
+    if not n > 0 or n == float("inf"):
+        raise argparse.ArgumentTypeError(f"must be more than 0, got {value}")
+    return n
 
 
 def _cmd_search(args: argparse.Namespace, root: Path) -> int:
@@ -377,6 +410,40 @@ def _cmd_orphans(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+def _parse(argv: list[str]) -> argparse.Namespace:
+    if argv and argv[0] == "search":
+        opts, terms = _split_search_args(argv[1:])
+        argv = ["search", *opts, "--", *terms]
+    return build_parser().parse_args(argv)
+
+
+def _cmd_watch(args: argparse.Namespace) -> int:
+    inner = list(args.inner)
+    if inner[:1] == ["--"]:
+        inner = inner[1:]
+    if not inner:
+        print("notefind: watch needs a command to run, e.g. notefind watch links",
+              file=sys.stderr)
+        return 2
+    if inner[0] == "watch":
+        print("notefind: watch can't run watch", file=sys.stderr)
+        return 2
+    inner_args = _parse(inner)  # fail now on bad options, not on every change
+    root = Path(inner_args.folder)
+    if not root.is_dir():
+        print(f"notefind: not a folder: {inner_args.folder}", file=sys.stderr)
+        return 2
+
+    def run() -> int:
+        code = main(inner)
+        sys.stdout.flush()
+        return code
+
+    return watching.watch(
+        root, run, args.interval, clear=args.clear, out=sys.stdout, err=sys.stderr
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -384,10 +451,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] == "search":
-        opts, terms = _split_search_args(argv[1:])
-        argv = ["search", *opts, "--", *terms]
-    args = build_parser().parse_args(argv)
+    args = _parse(argv)
+    if args.command == "watch":
+        return _cmd_watch(args)
     root = Path(args.folder)
     if not root.is_dir():
         print(f"notefind: not a folder: {args.folder}", file=sys.stderr)

@@ -50,7 +50,7 @@ Estimates are rough working hours for one person, including tests and docs.
 
 - [ ] `report --html`: single-file HTML page with tags, broken links and
       orphans (3 h)
-- [ ] `watch`: re-run `links` (or any command) when notes change, polling only,
+- [x] `watch`: re-run `links` (or any command) when notes change, polling only,
       no dependencies (3 h)
 
 ## v1.0 - release (about 4 h)
