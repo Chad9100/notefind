@@ -120,11 +120,18 @@ def plan_rename(
     return RenamePlan(old_rel, new_rel, changes, skipped)
 
 
-def apply_rename(root: Path, plan: RenamePlan, write: bool = True) -> list[Fix]:
-    """Rewrite the links, then rename the file. With write=False, nothing is saved."""
+def apply_rename(
+    root: Path, plan: RenamePlan, write: bool = True, diffs: list[str] | None = None
+) -> list[Fix]:
+    """Rewrite the links, then rename the file. With write=False, nothing is saved.
+
+    If `diffs` is a list, the unified diff of every rewritten note is appended
+    to it (the renamed note itself is shown as old path -> new path).
+    """
     fixes: list[Fix] = []
     for rel, items in plan.changes.items():
-        fixes.extend(fix_note(Path(root) / rel, rel, items, write))
+        fixes.extend(fix_note(Path(root) / rel, rel, items, write, diffs,
+                              plan.new if rel == plan.old else None))
     if write:
         os.replace(Path(root) / plan.old, Path(root) / plan.new)
     return [replace(f, path=plan.new) if f.path == plan.old else f for f in fixes]

@@ -212,6 +212,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run", action="store_true",
         help="show what would change without renaming or writing anything",
     )
+    p.add_argument(
+        "--diff", action="store_true",
+        help="with --dry-run, print unified diffs instead of one line per link",
+    )
 
     p = sub.add_parser(
         "orphans",
@@ -454,7 +458,11 @@ def _cmd_rename(args: argparse.Namespace, root: Path) -> int:
         return 2
     try:
         plan = plan_rename(root, notes, files, matches[0], args.new)
-        fixes = apply_rename(root, plan, write=not args.dry_run)
+        if args.diff and not args.dry_run:
+            print("notefind: --diff only works with --dry-run", file=sys.stderr)
+            return 2
+        diffs: list[str] | None = [] if args.diff else None
+        fixes = apply_rename(root, plan, write=not args.dry_run, diffs=diffs)
     except (RenameError, OSError) as exc:
         print(f"notefind: {exc}", file=sys.stderr)
         return 2
@@ -468,11 +476,17 @@ def _cmd_rename(args: argparse.Namespace, root: Path) -> int:
             ],
             "skipped": [{"path": s.path, "line": s.line, "link": s.link} for s in plan.skipped],
         }
+        if diffs is not None:
+            payload["diff"] = "".join(diffs)
         print(json.dumps(payload, indent=2, ensure_ascii=False))
         return 0
     print(f"{'would rename' if args.dry_run else 'renamed'} {plan.old} -> {plan.new}")
-    for f in fixes:
-        print(f"{f.path}:{f.line}: {f.old} -> {f.new}")
+    if diffs is not None:
+        for d in diffs:
+            sys.stdout.write(d if d.endswith("\n") else d + "\n")
+    else:
+        for f in fixes:
+            print(f"{f.path}:{f.line}: {f.old} -> {f.new}")
     sys.stdout.flush()
     for s in plan.skipped:
         print(f"{s.path}:{s.line}: left alone, {s.link!r} also matches other notes",

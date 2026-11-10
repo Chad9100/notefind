@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -58,7 +59,10 @@ def _decode(raw: bytes) -> str | None:
         return None  # rewriting would destroy the bytes we can't read
 
 
-def fix_note(path: Path, rel: str, broken: list[BrokenLink], write: bool) -> list[Fix]:
+def fix_note(
+    path: Path, rel: str, broken: list[BrokenLink], write: bool,
+    diffs: list[str] | None = None, new_rel: str | None = None,
+) -> list[Fix]:
     """Apply the unambiguous suggestions of one note's broken links.
 
     Only the link target changes: aliases, titles, `<...>` brackets, the
@@ -73,6 +77,7 @@ def fix_note(path: Path, rel: str, broken: list[BrokenLink], write: bool) -> lis
     bom = text.startswith(BOM)
     if bom:
         text = text[1:]
+    original = text
     parts = NEWLINE_RE.split(text)
     lines, seps = parts[0::2], parts[1::2]
     fixes: list[Fix] = []
@@ -94,8 +99,13 @@ def fix_note(path: Path, rel: str, broken: list[BrokenLink], write: bool) -> lis
         start, end = span
         lines[i] = lines[i][:start] + b.suggestion + lines[i][end:]
         fixes.append(Fix(rel, i + 1, b.kind, b.target, b.suggestion))
+    out = "".join(line + sep for line, sep in zip(lines, seps + [""]))
+    if fixes and diffs is not None:
+        diffs.extend(difflib.unified_diff(
+            original.splitlines(keepends=True), out.splitlines(keepends=True),
+            fromfile=f"a/{rel}", tofile=f"b/{new_rel or rel}",
+        ))
     if fixes and write:
-        out = "".join(line + sep for line, sep in zip(lines, seps + [""]))
         path.write_bytes(((BOM if bom else "") + out).encode("utf-8"))
     return fixes
 

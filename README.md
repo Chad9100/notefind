@@ -615,7 +615,30 @@ notes share (`[[Plan]]` with `a/Plan.md` and `b/Plan.md`) is left alone and
 listed on stderr. `--dry-run` lists the rewrites and changes nothing. It
 refuses (exit code 2) when `OLD` is unknown or ambiguous, or `NEW` exists.
 `--json` prints `{"dry_run", "renamed": {"from", "to"}, "rewritten": [...],
-"skipped": [...]}`. Moving a note to another folder is not supported yet.
+"skipped": [...]}`.
+
+Add `--diff` to a `--dry-run` to see real unified diffs instead of one line
+per link (the renamed note is shown as old path to new path; with `--json`
+the diff is in a `"diff"` string). `--diff` without `--dry-run` exits with 2.
+
+```console
+$ notefind rename "Garden Plan" "Garden Layout" --dry-run --diff
+would rename Garden Plan.md -> Garden Layout.md
+--- a/Garden Plan.md
++++ b/Garden Layout.md
+@@ -1,2 +1,2 @@
+ # Beds
+-See [[Garden Plan#Beds]]
++See [[Garden Layout#Beds]]
+--- a/daily/today.md
++++ b/daily/today.md
+@@ -1 +1 @@
+-Today: [[Garden Plan]]
++Today: [[Garden Layout]]
+would rewrite 2 links in 2 notes
+```
+
+Moving a note to another folder is not supported yet.
 
 ### orphans
 

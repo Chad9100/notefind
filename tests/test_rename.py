@@ -155,3 +155,37 @@ def test_rename_json(make_vault, capsys):
                        "old": "Plan#Beds", "new": "Schedule#Beds"}],
         "skipped": [],
     }
+
+
+def test_dry_run_diff_shows_unified_diffs_and_writes_nothing(make_vault, capsys):
+    root = make_vault({
+        "Plan.md": "# Beds\nself [[Plan#Beds]]\n",
+        "daily/today.md": "intro\n[[Plan]] here\nend\n",
+    })
+    code, out, err = run(capsys, "rename", "Plan", "Schedule", "--dry-run", "--diff",
+                         "-C", str(root))
+    assert code == 0
+    assert "--- a/daily/today.md" in out
+    assert "+++ b/daily/today.md" in out
+    assert "-[[Plan]] here" in out
+    assert "+[[Schedule]] here" in out
+    assert "--- a/Plan.md" in out and "+++ b/Schedule.md" in out
+    assert "would rewrite 2 links in 2 notes" in err
+    assert (root / "Plan.md").exists()
+    assert read(root, "daily/today.md") == "intro\n[[Plan]] here\nend\n"
+
+
+def test_diff_requires_dry_run(make_vault, capsys):
+    root = make_vault({"Plan.md": "x\n"})
+    code, out, err = run(capsys, "rename", "Plan", "Schedule", "--diff", "-C", str(root))
+    assert code == 2
+    assert "--dry-run" in err
+    assert (root / "Plan.md").exists()
+
+
+def test_dry_run_diff_in_json(make_vault, capsys):
+    root = make_vault({"Plan.md": "x\n", "a.md": "[[Plan]]\n"})
+    code, out, err = run(capsys, "rename", "Plan", "Schedule", "--dry-run", "--diff",
+                         "--json", "-C", str(root))
+    assert code == 0
+    assert "+[[Schedule]]" in json.loads(out)["diff"]

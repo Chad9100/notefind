@@ -41,8 +41,10 @@ Estimates are rough working hours for one person, including tests and docs.
 
 - [x] `rename OLD NEW`: rename a note (in its folder) and rewrite every wiki
       and Markdown link to it; `--dry-run` lists the rewrites (3 h; split)
+- [x] `rename --dry-run --diff`: real unified diffs instead of one line per
+      link (1 h; split out of the item below)
 - [ ] `rename` across folders: also rewrite the moved note's own relative
-      links, and show real unified diffs with `--dry-run` (2 h)
+      links (1 h)
 - [x] `links --suggest`: did-you-mean fixes for broken links (closest note,
       file, heading or block ID) (2 h)
 - [x] `links --fix`: apply suggestions that are unambiguous, with `--dry-run`
