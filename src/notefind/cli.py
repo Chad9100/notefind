@@ -138,6 +138,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--no-anchors", action="store_true",
         help="only check that targets exist, not their #headings and #^blocks",
     )
+    p.add_argument(
+        "--suggest", action="store_true",
+        help="suggest the closest existing note, file, heading or block for "
+             "each broken link (likely typos and moved files)",
+    )
 
     p = sub.add_parser(
         "backlinks",
@@ -245,20 +250,26 @@ def _cmd_tags(args: argparse.Namespace, root: Path) -> int:
 def _cmd_links(args: argparse.Namespace, root: Path) -> int:
     files = walk_files(root)
     notes = load_notes(root, files)
-    broken, checked = find_broken_links(root, notes, files, check_anchors=not args.no_anchors)
+    broken, checked = find_broken_links(
+        root, notes, files, check_anchors=not args.no_anchors, suggest=args.suggest
+    )
     if args.json:
         payload = {
             "checked": checked,
             "broken": [
                 {"path": b.path, "line": b.line, "kind": b.kind, "target": b.target,
-                 "reason": b.reason, **({"detail": b.detail} if b.detail else {})}
+                 "reason": b.reason, **({"detail": b.detail} if b.detail else {}),
+                 **({"suggestion": b.suggestion or None} if args.suggest else {})}
                 for b in broken
             ],
         }
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         for b in broken:
-            detail = f" ({b.detail})" if b.detail else ""
+            extras = [b.detail] if b.detail else []
+            if b.suggestion:
+                extras.append(f'did you mean "{b.suggestion}"?')
+            detail = f" ({'; '.join(extras)})" if extras else ""
             print(f"{b.path}:{b.line}: broken link -> {b.target}{detail}")
         sys.stdout.flush()
         summary = f"{len(broken)} broken" if broken else "no broken links"

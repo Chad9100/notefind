@@ -469,6 +469,26 @@ projects/watering.md:6: broken link -> ../manuals/timer.md
 
 Exit code is 1 if any link is broken, 0 otherwise, so it can gate a CI job.
 
+Add `--suggest` to get a "did you mean" for each broken link: the closest
+existing note name, file name, heading or block ID, compared ignoring case
+(at least 60% similar, by `difflib`). It catches typos (`[[Gardn Plan]]`),
+renamed headings (`[[Compost#Ratio]]`) and files linked from the wrong folder,
+for which it gives the path relative to the linking note. For example, with
+`[[Compst]] [[Compost#Ratio]] [up](pruning.md)` in `daily/today.md`:
+
+```console
+$ notefind links --suggest
+daily/today.md:1: broken link -> Compst (did you mean "Compost"?)
+daily/today.md:1: broken link -> Compost#Ratio (no heading "Ratio" in Compost.md; did you mean "Compost#Ratios"?)
+daily/today.md:1: broken link -> pruning.md (did you mean "../projects/pruning.md"?)
+```
+
+Links with nothing close enough (like all four in `examples/notes`) get
+no suggestion. A wiki suggestion uses the bare note name unless several notes
+share it, then a path; file suggestions keep the link's `#anchor`, and
+heading suggestions for Markdown links are GitHub-style slugs. Nothing is
+rewritten: `--suggest` only reports.
+
 ```console
 $ notefind links --json
 {
@@ -508,7 +528,8 @@ $ notefind links --json
 ```
 
 `reason` is `no-file`, `no-heading` or `no-block`; `detail` is only there for
-missing anchors.
+missing anchors. With `--suggest`, every entry also has a `suggestion`: the
+corrected target as a string, or `null` when nothing is close.
 
 ### backlinks
 
@@ -568,6 +589,7 @@ src/notefind/
   resolve.py    mapping link targets and note names to notes
   anchors.py    headings, slugs and block IDs for #anchor checks
   linkcheck.py  resolving wiki and Markdown links and their anchors
+  suggest.py    closest note, file or heading for links --suggest
   graph.py      backlinks and orphans
   cli.py        argparse front end
 tests/          pytest suite using throwaway tmp_path note folders

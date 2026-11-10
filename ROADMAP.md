@@ -37,11 +37,14 @@ Estimates are rough working hours for one person, including tests and docs.
 - [ ] Parallel reading on cold runs (1 h)
 - [ ] Benchmarks on a generated 20k-note vault in CI (2 h)
 
-## v0.5 - maintenance commands (about 7 h)
+## v0.5 - maintenance commands (about 9 h)
 
 - [ ] `rename OLD NEW`: rename a note and rewrite every wiki and Markdown link
       to it, with `--dry-run` showing a diff (5 h)
-- [ ] `--fix` suggestions for broken links (closest existing note name) (2 h)
+- [x] `links --suggest`: did-you-mean fixes for broken links (closest note,
+      file, heading or block ID) (2 h)
+- [ ] `links --fix`: apply suggestions that are unambiguous, with `--dry-run`
+      showing the changes first (2 h)
 
 ## v0.6 - reports and watching (about 6 h)
 
@@ -56,4 +59,4 @@ Estimates are rough working hours for one person, including tests and docs.
 - [ ] Publish to PyPI with trusted publishing from a tagged release (1 h)
 - [ ] Stable, documented JSON schema; changelog (1 h)
 
-Total planned after v0.1: about 39 hours.
+Total planned after v0.1: about 41 hours.
