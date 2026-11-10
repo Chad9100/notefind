@@ -13,7 +13,8 @@ plain directories. It does these things:
   line shown and highlighted;
 - **tags**: list every tag (front matter and inline `#tags`) with note counts;
 - **links**: find broken `[[wiki links]]` and relative `[markdown](links.md)`,
-  including `#Heading` and `#^block` anchors that don't exist;
+  including `#Heading` and `#^block` anchors that don't exist, with
+  did-you-mean suggestions and `--fix` to apply the unambiguous ones;
 - **backlinks**: list the notes that link to a given note;
 - **orphans**: list notes that nothing links to.
 
@@ -486,8 +487,38 @@ daily/today.md:1: broken link -> pruning.md (did you mean "../projects/pruning.m
 Links with nothing close enough (like all four in `examples/notes`) get
 no suggestion. A wiki suggestion uses the bare note name unless several notes
 share it, then a path; file suggestions keep the link's `#anchor`, and
-heading suggestions for Markdown links are GitHub-style slugs. Nothing is
-rewritten: `--suggest` only reports.
+heading suggestions for Markdown links are GitHub-style slugs. `--suggest`
+only reports; nothing is rewritten.
+
+#### Fixing links: `--fix`
+
+`--fix` rewrites broken links in place with their suggestion, but only when
+the suggestion is unambiguous: no other name, heading or block ID is just as
+close, and only one file in the folder has the chosen name. Everything else is
+reported as usual, with its suggestion, for you to decide. Start with
+`--dry-run` to see what would change without touching any file:
+
+```console
+$ notefind links --fix --dry-run
+daily/today.md:1: would fix Compst -> Compost
+daily/today.md:1: would fix Compost#Ratio -> Compost#Ratios
+daily/today.md:1: broken link -> Pln (did you mean "a/Plan"?)
+would fix 2 links in 1 note, 1 broken left (3 links checked in 4 notes)
+$ notefind links --fix
+daily/today.md:1: fixed Compst -> Compost
+daily/today.md:1: fixed Compost#Ratio -> Compost#Ratios
+daily/today.md:1: broken link -> Pln (did you mean "a/Plan"?)
+fixed 2 links in 1 note, 1 broken left (3 links checked in 4 notes)
+```
+
+(`Pln` is left alone because both `a/Plan.md` and `b/Plan.md` exist.)
+
+Only the link target changes: aliases (`[[Compst|my heap]]`), embeds, link
+titles, `<angle brackets>`, the note's line endings and a UTF-8 BOM are kept,
+and lookalikes inside code are never touched. A reference-style link is fixed
+in its `[ref]: path` definition. Notes that aren't valid UTF-8 are skipped so
+their bytes stay intact. The exit code is 1 if broken links remain after the
+fixes (or would remain, with `--dry-run`), 0 otherwise.
 
 ```console
 $ notefind links --json
@@ -529,7 +560,10 @@ $ notefind links --json
 
 `reason` is `no-file`, `no-heading` or `no-block`; `detail` is only there for
 missing anchors. With `--suggest`, every entry also has a `suggestion`: the
-corrected target as a string, or `null` when nothing is close.
+corrected target as a string, or `null` when nothing is close. With `--fix`,
+the payload also has `dry_run` and `fixed`, a list of
+`{"path", "line", "kind", "old", "new"}` (for a reference-style link, `line`
+is the definition's line), and `broken` lists only the links still broken.
 
 ### backlinks
 

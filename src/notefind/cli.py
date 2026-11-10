@@ -12,6 +12,7 @@ from typing import Sequence, TextIO
 
 from . import __version__
 from .graph import NoteResolver, backlinks, link_edges, orphans
+from .fix import fix_links
 from .linkcheck import find_broken_links
 from .parse import extract_tags
 from .scan import load_notes, walk_files
@@ -143,6 +144,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="suggest the closest existing note, file, heading or block for "
              "each broken link (likely typos and moved files)",
     )
+    p.add_argument(
+        "--fix", action="store_true",
+        help="rewrite broken links whose suggestion is unambiguous (implies "
+             "--suggest); the rest are reported as usual",
+    )
+    p.add_argument(
+        "--dry-run", action="store_true",
+        help="with --fix: show what would change without writing any file",
+    )
 
     p = sub.add_parser(
         "backlinks",
@@ -248,14 +258,30 @@ def _cmd_tags(args: argparse.Namespace, root: Path) -> int:
 
 
 def _cmd_links(args: argparse.Namespace, root: Path) -> int:
+    if args.dry_run and not args.fix:
+        print("notefind: --dry-run only works with --fix", file=sys.stderr)
+        return 2
+    if args.fix:
+        args.suggest = True
     files = walk_files(root)
     notes = load_notes(root, files)
     broken, checked = find_broken_links(
         root, notes, files, check_anchors=not args.no_anchors, suggest=args.suggest
     )
+    fixes = fix_links(root, broken, write=not args.dry_run) if args.fix else []
+    if fixes:
+        done = {(f.path, f.old, f.new) for f in fixes}
+        broken = [
+            b for b in broken
+            if not (b.unambiguous and (b.path, b.target, b.suggestion) in done)
+        ]
     if args.json:
         payload = {
             "checked": checked,
+            **({"dry_run": args.dry_run, "fixed": [
+                {"path": f.path, "line": f.line, "kind": f.kind, "old": f.old, "new": f.new}
+                for f in fixes
+            ]} if args.fix else {}),
             "broken": [
                 {"path": b.path, "line": b.line, "kind": b.kind, "target": b.target,
                  "reason": b.reason, **({"detail": b.detail} if b.detail else {}),
@@ -265,6 +291,9 @@ def _cmd_links(args: argparse.Namespace, root: Path) -> int:
         }
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
+        verb = "would fix" if args.dry_run else "fixed"
+        for f in fixes:
+            print(f"{f.path}:{f.line}: {verb} {f.old} -> {f.new}")
         for b in broken:
             extras = [b.detail] if b.detail else []
             if b.suggestion:
@@ -273,6 +302,12 @@ def _cmd_links(args: argparse.Namespace, root: Path) -> int:
             print(f"{b.path}:{b.line}: broken link -> {b.target}{detail}")
         sys.stdout.flush()
         summary = f"{len(broken)} broken" if broken else "no broken links"
+        if args.fix:
+            count = f"{len(fixes)} link{'' if len(fixes) == 1 else 's'}"
+            notes_fixed = len({f.path for f in fixes})
+            where = f" in {notes_fixed} note{'' if notes_fixed == 1 else 's'}" if fixes else ""
+            left = f"{len(broken)} broken left" if broken else "no broken links left"
+            summary = f"{verb} {count}{where}, {left}"
         print(f"{summary} ({checked} links checked in {len(notes)} notes)", file=sys.stderr)
     return 1 if broken else 0
 

@@ -29,6 +29,9 @@ class BrokenLink:
     detail: str = ""
     # With suggest=True: the link target as it probably should be written.
     suggestion: str = ""
+    # True when the suggestion is the only sensible one (no tie between
+    # candidates, one file with that name): safe for `links --fix` to apply.
+    unambiguous: bool = False
 
 
 class LinkIndex:
@@ -112,32 +115,37 @@ def find_broken_links(
     resolver = NoteResolver(notes)
     texts = {note.rel: note.text for note in notes}
     cache: dict[str, Anchors] = {}
-    suggester = FileSuggester(files) if suggest else None
+    suggesters = (FileSuggester(files), FileSuggester(files, unique=True)) if suggest else ()
 
-    def file_suggestion(source: str, link: Link) -> str:
-        if suggester is None:
-            return ""
+    # Each suggestion is worked out twice, the second time insisting on a
+    # unique answer; when both agree, the suggestion is unambiguous.
+    def file_suggestion(source: str, link: Link) -> tuple[str, bool]:
         name, fragment = split_fragment(link)
-        if link.kind == "wiki":
-            fixed = suggester.wiki(name)
-        else:
-            fixed = suggester.markdown(source, name)
-        if fixed is None:
-            return ""
-        return f"{fixed}#{fragment}" if fragment else fixed
+        results = []
+        for s in suggesters:
+            fixed = s.wiki(name) if link.kind == "wiki" else s.markdown(source, name)
+            if fixed is not None and fragment:
+                fixed = f"{fixed}#{fragment}"
+            results.append(fixed or "")
+        if not results:
+            return "", False
+        return results[0], bool(results[0]) and results[0] == results[1]
 
-    def anchor_suggestion(link: Link, target: str) -> str:
-        if suggester is None:
-            return ""
+    def anchor_suggestion(link: Link, target: str) -> tuple[str, bool]:
+        if not suggest:
+            return "", False
         name, fragment = split_fragment(link)
         suggest_fragment = (
             suggest_wiki_fragment if link.kind == "wiki" else suggest_markdown_fragment
         )
-        fixed = suggest_fragment(texts[target], fragment, anchors_of(target).blocks)
-        if fixed is None:
-            return ""
         written = link.target.partition("#")[0] if link.kind == "markdown" else name
-        return f"{written}#{fixed}"
+        results = []
+        for unique in (False, True):
+            fixed = suggest_fragment(
+                texts[target], fragment, anchors_of(target).blocks, unique=unique
+            )
+            results.append(f"{written}#{fixed}" if fixed is not None else "")
+        return results[0], bool(results[0]) and results[0] == results[1]
 
     def anchors_of(rel: str) -> Anchors:
         if rel not in cache:
@@ -157,16 +165,16 @@ def find_broken_links(
             elif link.kind == "wiki":
                 if not index.has_wiki_target(link.target):
                     broken.append(BrokenLink(
-                        note.rel, link.line, link.target, link.kind,
-                        suggestion=file_suggestion(note.rel, link),
+                        note.rel, link.line, link.target, link.kind, "no-file", "",
+                        *file_suggestion(note.rel, link),
                     ))
                     continue
                 targets = resolver.by_name(link.target)
             else:
                 if not markdown_target_exists(root, note.rel, link.target):
                     broken.append(BrokenLink(
-                        note.rel, link.line, link.target, link.kind,
-                        suggestion=file_suggestion(note.rel, link),
+                        note.rel, link.line, link.target, link.kind, "no-file", "",
+                        *file_suggestion(note.rel, link),
                     ))
                     continue
                 targets = resolver.by_relative_path(note.rel, link.target)
@@ -181,6 +189,6 @@ def find_broken_links(
                 reason = "no-block" if problems[0].startswith("no block") else "no-heading"
                 broken.append(BrokenLink(
                     note.rel, link.line, link.target, link.kind, reason, detail,
-                    anchor_suggestion(link, targets[0]),
+                    *anchor_suggestion(link, targets[0]),
                 ))
     return broken, checked

@@ -43,7 +43,7 @@ Estimates are rough working hours for one person, including tests and docs.
       to it, with `--dry-run` showing a diff (5 h)
 - [x] `links --suggest`: did-you-mean fixes for broken links (closest note,
       file, heading or block ID) (2 h)
-- [ ] `links --fix`: apply suggestions that are unambiguous, with `--dry-run`
+- [x] `links --fix`: apply suggestions that are unambiguous, with `--dry-run`
       showing the changes first (2 h)
 
 ## v0.6 - reports and watching (about 6 h)

@@ -15,28 +15,40 @@ from .scan import is_note
 CUTOFF = 0.6
 
 
-def closest(word: str, candidates: Iterable[str], cutoff: float = CUTOFF) -> str | None:
+def closest(
+    word: str, candidates: Iterable[str], cutoff: float = CUTOFF, unique: bool = False
+) -> str | None:
     """The candidate most similar to word, ignoring case, or None if none is close.
 
-    Ties go to the candidate that sorts first, so results are stable.
+    Ties go to the candidate that sorts first, so results are stable. With
+    unique, a tie for the best score gives None instead: there is no single
+    obvious answer.
     """
     key = word.casefold().strip()
     if not key:
         return None
     best: str | None = None
     best_score = cutoff
+    tied = False
     for cand in sorted(set(candidates)):
         score = SequenceMatcher(None, key, cand.casefold()).ratio()
         if score > best_score or (score == best_score and best is None):
-            best, best_score = cand, score
-    return best
+            best, best_score, tied = cand, score, False
+        elif score == best_score:
+            tied = True
+    return None if unique and tied else best
 
 
 class FileSuggester:
-    """Closest existing note or file for a broken wiki or Markdown link."""
+    """Closest existing note or file for a broken wiki or Markdown link.
 
-    def __init__(self, files: list[str]):
+    With unique, only answers that leave no choice are given: no tie between
+    names, and only one file with the chosen name.
+    """
+
+    def __init__(self, files: list[str], unique: bool = False):
         self.files = list(files)
+        self.unique = unique
         self.stem_count: dict[str, int] = {}
         self.by_stem: dict[str, list[str]] = {}
         self.by_name: dict[str, list[str]] = {}
@@ -55,15 +67,19 @@ class FileSuggester:
         base = name.rsplit("/", 1)[-1]
         if "." in base and not is_note(base):
             # An attachment such as diagram.png: match whole file names.
-            match = closest(base, self.by_name)
+            match = closest(base, self.by_name, unique=self.unique)
             if match is None:
                 return None
             rels = sorted(self.by_name[match])
+            if self.unique and len(rels) > 1:
+                return None
             return match if len(rels) == 1 or "/" not in name else rels[0]
-        match = closest(strip_note_suffix(base), self.by_stem)
+        match = closest(strip_note_suffix(base), self.by_stem, unique=self.unique)
         if match is None:
             return None
         rels = sorted(self.by_stem[match])
+        if self.unique and self.stem_count[match.lower()] > 1:
+            return None
         if "/" in name or self.stem_count[match.lower()] > 1:
             return strip_note_suffix(rels[0])  # a path is needed to be unambiguous
         return match
@@ -77,10 +93,12 @@ class FileSuggester:
         keys: dict[str, list[str]] = {}
         for name, rels in self.by_name.items():
             keys.setdefault(strip_note_suffix(name), []).extend(rels)
-        match = closest(strip_note_suffix(base), keys)
+        match = closest(strip_note_suffix(base), keys, unique=self.unique)
         if match is None:
             return None
         rels = sorted(keys[match])
+        if self.unique and len(rels) > 1:
+            return None
         if clean.startswith("/"):
             return ("/" + rels[0]).replace(" ", "%20")
         start = posixpath.dirname(source_rel) or "."
@@ -89,11 +107,13 @@ class FileSuggester:
         return best.replace(" ", "%20")
 
 
-def suggest_wiki_fragment(text: str, fragment: str, blocks: Iterable[str]) -> str | None:
+def suggest_wiki_fragment(
+    text: str, fragment: str, blocks: Iterable[str], unique: bool = False
+) -> str | None:
     """A corrected `#fragment` for a wiki link into a note with this text."""
     fragment = fragment.strip()
     if fragment.startswith("^"):
-        match = closest(fragment[1:], blocks)
+        match = closest(fragment[1:], blocks, unique=unique)
         return f"^{match}" if match else None
     by_key = _headings_by_key(text)
     parts = []
@@ -103,7 +123,7 @@ def suggest_wiki_fragment(text: str, fragment: str, blocks: Iterable[str]) -> st
         if not key or key in by_key:
             parts.append(part)
             continue
-        match = closest(key, by_key)
+        match = closest(key, by_key, unique=unique)
         if match is None:
             return None
         parts.append(by_key[match])
@@ -111,13 +131,15 @@ def suggest_wiki_fragment(text: str, fragment: str, blocks: Iterable[str]) -> st
     return "#".join(parts) if changed else None
 
 
-def suggest_markdown_fragment(text: str, fragment: str, blocks: Iterable[str]) -> str | None:
+def suggest_markdown_fragment(
+    text: str, fragment: str, blocks: Iterable[str], unique: bool = False
+) -> str | None:
     """A corrected `#fragment` (a GitHub-style slug) for a Markdown link."""
     fragment = unquote(fragment).strip()
     if fragment.startswith("^"):
-        return suggest_wiki_fragment(text, fragment, blocks)
+        return suggest_wiki_fragment(text, fragment, blocks, unique)
     by_key = _headings_by_key(text)
-    match = closest(loose_key(fragment), by_key)
+    match = closest(loose_key(fragment), by_key, unique=unique)
     return github_slug(by_key[match]) if match else None
 
 
