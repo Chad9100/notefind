@@ -236,3 +236,48 @@ def test_python_dash_m_entry_point(vault):
     )
     assert proc.returncode == 0
     assert proc.stdout.startswith("pasta.md:5:")
+
+
+# --- search --all-lines ---------------------------------------------------
+
+def test_search_all_lines_prints_each_matching_line(make_vault, capsys):
+    root = make_vault({
+        "a.md": "kale soup\nbeans\nmore kale\n",
+        "b.md": "kale once\n",
+    })
+    code, out, err = run(capsys, "search", "kale", "--all-lines", "-C", str(root), "--color", "never")
+    assert code == 0
+    assert out.splitlines() == ["a.md:1: kale soup", "a.md:3: more kale", "b.md:1: kale once"]
+    assert "2 notes matched (3 lines)" in err
+
+
+def test_search_all_lines_limit_counts_notes(make_vault, capsys):
+    root = make_vault({"a.md": "kale\nkale\nkale\n", "b.md": "kale\n"})
+    code, out, err = run(capsys, "search", "kale", "--all-lines", "--limit", "1", "-C", str(root))
+    assert code == 0
+    assert out.splitlines() == ["a.md:1: kale", "a.md:2: kale", "a.md:3: kale"]
+    assert "2 notes matched, showing 1 (3 lines)" in err
+
+
+def test_search_all_lines_highlights_every_line(make_vault, capsys):
+    root = make_vault({"a.md": "kale\nKale\n"})
+    _, out, _ = run(capsys, "search", "kale", "--all-lines", "-C", str(root), "--color", "always")
+    assert out.count(HIGHLIGHT_ON) == 2
+
+
+def test_search_all_lines_json(make_vault, capsys):
+    root = make_vault({"a.md": "kale\nbeans\nkale beans\n"})
+    code, out, _ = run(capsys, "search", "kale", "--all-lines", "--json", "-C", str(root))
+    assert code == 0
+    data = json.loads(out)
+    assert data["query"]["all_lines"] is True
+    [result] = data["results"]
+    assert result["line"] == 1
+    assert result["lines"] == [{"line": 1, "snippet": "kale"}, {"line": 3, "snippet": "kale beans"}]
+
+
+def test_search_json_without_all_lines_has_no_lines_key(make_vault, capsys):
+    root = make_vault({"a.md": "kale\nkale\n"})
+    _, out, _ = run(capsys, "search", "kale", "--json", "-C", str(root))
+    data = json.loads(out)
+    assert "all_lines" not in data["query"] and "lines" not in data["results"][0]

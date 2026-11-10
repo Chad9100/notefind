@@ -316,3 +316,49 @@ def test_regex_lookaround_zero_width_matches_are_not_counted():
 def test_fuzzy_and_regex_cannot_be_combined():
     with pytest.raises(QueryError, match="can't be combined"):
         search([note("a.md", "x")], parse_query(["x"]), fuzzy=True, regex=True)
+
+
+# --- all_lines ------------------------------------------------------------
+
+def test_all_lines_lists_every_matching_line_once_in_order():
+    text = "apple pie\nno match\nApple and apple\n\nlast apple"
+    [hit] = search([note("a.md", text)], parse_query(["apple"]), all_lines=True)
+    assert hit.line == 1 and hit.matches == 4
+    assert hit.lines == [(1, "apple pie"), (3, "Apple and apple"), (5, "last apple")]
+
+
+def test_all_lines_merges_lines_of_different_terms():
+    text = "tomato here\nbasil there\nboth tomato basil\nneither"
+    [hit] = search([note("a.md", text)], parse_query(["basil", "tomato"]), all_lines=True)
+    assert [n for n, _ in hit.lines] == [1, 2, 3]
+
+
+def test_all_lines_phrase_across_lines_counts_on_its_first_line():
+    [hit] = search([note("a.md", "x\nfull\nsun today")], parse_query(['"full sun"']), all_lines=True)
+    assert hit.lines == [(2, "full")]
+
+
+def test_all_lines_with_filter_only_query_uses_first_body_line():
+    notes = [note("a.md", "---\ntags: [x]\n---\nFirst line\nsecond")]
+    [hit] = search(notes, parse_query(["tag:x"]), all_lines=True)
+    assert hit.lines == [(4, "First line")]
+
+
+def test_all_lines_includes_fuzzy_and_regex_matches():
+    text = "tomatos here\nnothing\nTOMATO again"
+    [hit] = search([note("a.md", text)], parse_query(["tomato"]), fuzzy=True, all_lines=True)
+    assert [n for n, _ in hit.lines] == [1, 3]
+    [hit] = search([note("a.md", text)], parse_query(["^to"]), regex=True, all_lines=True)
+    assert [n for n, _ in hit.lines] == [1, 3]
+
+
+def test_all_lines_snippets_are_cut_around_the_match():
+    long_line = "x" * 150 + " needle " + "y" * 150
+    [hit] = search([note("a.md", f"needle\n{long_line}")], parse_query(["needle"]), all_lines=True)
+    assert hit.lines[1][0] == 2
+    assert "needle" in hit.lines[1][1] and hit.lines[1][1].startswith("...")
+
+
+def test_without_all_lines_hits_have_no_line_list():
+    [hit] = search([note("a.md", "apple\napple")], parse_query(["apple"]))
+    assert hit.lines == []

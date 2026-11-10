@@ -111,6 +111,11 @@ def build_parser() -> argparse.ArgumentParser:
              "regular expressions (^ and $ match at line starts and ends)",
     )
     p.add_argument(
+        "--all-lines", action="store_true",
+        help="show every matching line of each note, not just the first "
+             "(--limit still counts notes)",
+    )
+    p.add_argument(
         "--color", choices=("auto", "always", "never"), default="auto",
         help="highlight matches (default: auto, only on a terminal without NO_COLOR)",
     )
@@ -166,7 +171,9 @@ def _cmd_search(args: argparse.Namespace, root: Path) -> int:
     try:
         # Compile before reading the folder, so a bad regex fails fast.
         patterns = [compile_pattern(s, **opts) for s in query.positive + query.excludes]
-        hits = search(load_notes(root), query, fuzzy=args.fuzzy, **opts)
+        hits = search(
+            load_notes(root), query, fuzzy=args.fuzzy, all_lines=args.all_lines, **opts
+        )
     except QueryError as exc:
         print(f"notefind: {exc}", file=sys.stderr)
         return 2
@@ -185,28 +192,36 @@ def _cmd_search(args: argparse.Namespace, root: Path) -> int:
                 **({"fuzzy": True} if args.fuzzy else {}),
                 **({"whole_word": True} if args.word else {}),
                 **({"regex": True} if args.regex else {}),
+                **({"all_lines": True} if args.all_lines else {}),
             },
             "total": len(hits),
             "results": [
                 {"path": h.path, "line": h.line, "matches": h.matches, "snippet": h.snippet,
-                 **({"fuzzy_words": h.fuzzy_words} if args.fuzzy else {})}
+                 **({"fuzzy_words": h.fuzzy_words} if args.fuzzy else {}),
+                 **({"lines": [{"line": n, "snippet": text} for n, text in h.lines]}
+                    if args.all_lines else {})}
                 for h in shown
             ],
         }
         print(json.dumps(payload, indent=2, ensure_ascii=False))
     else:
         color = use_color(args.color, sys.stdout)
+        printed = 0
         for h in shown:
-            loc = f"{h.path}:{h.line}"
-            if color:
-                loc = f"{PATH_COLOR}{h.path}{RESET}:{LINE_COLOR}{h.line}{RESET}"
             extra = words_pattern(h.fuzzy_words)
             line_patterns = patterns + [extra] if extra else patterns
-            print(f"{loc}: {highlight(h.snippet, line_patterns, color)}")
+            for number, snippet in (h.lines if args.all_lines else [(h.line, h.snippet)]):
+                loc = f"{h.path}:{number}"
+                if color:
+                    loc = f"{PATH_COLOR}{h.path}{RESET}:{LINE_COLOR}{number}{RESET}"
+                print(f"{loc}: {highlight(snippet, line_patterns, color)}")
+                printed += 1
         sys.stdout.flush()  # keep the summary after the results when 2>&1
         if hits:
             note = "note" if len(hits) == 1 else "notes"
             extra = f", showing {len(shown)}" if len(shown) < len(hits) else ""
+            if args.all_lines:
+                extra += f" ({printed} line{'' if printed == 1 else 's'})"
             print(f"{len(hits)} {note} matched{extra}", file=sys.stderr)
         else:
             print("no notes matched", file=sys.stderr)

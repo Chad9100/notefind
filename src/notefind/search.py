@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from bisect import bisect_right
 from dataclasses import dataclass, field
 from typing import Sequence
 
@@ -61,6 +62,9 @@ class Hit:
     # With fuzzy search: the words in the note that matched a term only
     # because they are within its typo budget (lowercased, sorted).
     fuzzy_words: list[str] = field(default_factory=list)
+    # With all_lines: every (line number, snippet) with a match, in order.
+    # The first entry is the same line as ``line``.
+    lines: list[tuple[int, str]] = field(default_factory=list)
 
 
 def _add(query: Query, text: str, negative: bool, quoted: bool) -> None:
@@ -334,12 +338,22 @@ def _first_body_line(note: Note) -> int:
     return 1
 
 
+def _line_starts(lines: list[str]) -> list[int]:
+    """Offset in the note's text where each line starts."""
+    starts, pos = [], 0
+    for line in lines:
+        starts.append(pos)
+        pos += len(line) + 1  # the "\n" after it
+    return starts
+
+
 def search(
     notes: list[Note],
     query: Query,
     fuzzy: bool = False,
     whole_word: bool = False,
     regex: bool = False,
+    all_lines: bool = False,
 ) -> list[Hit]:
     """Return matching notes, most matches first, ties broken by path.
 
@@ -349,6 +363,8 @@ def search(
     With ``whole_word``, terms, phrases and exclusions only match whole words.
     With ``regex``, they are regular expressions (see ``compile_pattern``);
     it can't be combined with ``fuzzy``. Raises QueryError for a bad regex.
+    With ``all_lines``, each hit also lists every line where a term or
+    phrase match starts (a phrase spanning lines counts on its first line).
     """
     if fuzzy and regex:
         raise QueryError("--fuzzy and --regex can't be combined")
@@ -385,6 +401,7 @@ def search(
                 close_words.update(close)
         total = 0
         first: int | None = None
+        offsets: list[int] = []
         for pattern in positive:
             # A regex can still match empty text in some places (lookarounds).
             found = [m.start() for m in pattern.finditer(text) if m.end() > m.start()]
@@ -392,12 +409,22 @@ def search(
                 break
             total += len(found)
             first = found[0] if first is None else min(first, found[0])
+            if all_lines:
+                offsets.extend(found)
         else:
             if first is None:
                 line = _first_body_line(note)
             else:
                 line = text.count("\n", 0, first) + 1
             snippet = make_snippet(note.lines[line - 1], positive)
-            hits.append(Hit(note.rel, line, total, snippet, sorted(close_words)))
+            hit = Hit(note.rel, line, total, snippet, sorted(close_words))
+            if all_lines:
+                if offsets:
+                    starts = _line_starts(note.lines)
+                    numbers = sorted({bisect_right(starts, o) for o in offsets})
+                    hit.lines = [(n, make_snippet(note.lines[n - 1], positive)) for n in numbers]
+                else:
+                    hit.lines = [(line, snippet)]
+            hits.append(hit)
     hits.sort(key=lambda h: (-h.matches, h.path))
     return hits

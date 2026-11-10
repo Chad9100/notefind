@@ -9,7 +9,8 @@ plain directories. It does these things:
   `-exclusions`, `tag:` filters and `path:` / `title:` / front matter field
   filters (`status:done`), optional typo tolerance (`--fuzzy`),
   whole-word (`-w`) and regular expression (`--regex`) modes, ranked by
-  number of matches, with the matching line shown and highlighted;
+  number of matches, with the first (or with `--all-lines` every) matching
+  line shown and highlighted;
 - **tags**: list every tag (front matter and inline `#tags`) with note counts;
 - **links**: find broken `[[wiki links]]` and relative `[markdown](links.md)`,
   including `#Heading` and `#^block` anchors that don't exist;
@@ -55,7 +56,7 @@ The output below is real output from the made-up notes in
 
 ```
 notefind search QUERY... [-C FOLDER] [--limit N] [--json] [--fuzzy] [-w] [--regex]
-                [--color auto|always|never]
+                [--all-lines] [--color auto|always|never]
 ```
 
 | Query               | Meaning                                         |
@@ -281,6 +282,69 @@ $ echo $?
 
 In `--json` output the query gets `"whole_word": true` and `"regex": true`
 when those modes are on.
+
+#### Every matching line: `--all-lines`
+
+Normally each note shows only its first matching line. With `--all-lines`
+every line where a term or phrase matches is printed as its own `path:line:`
+row, in line order, each line once even if it matches several times. A phrase
+that wraps onto the next line counts on the line where it starts. `--limit`
+still counts notes, and the summary adds the number of lines printed:
+
+```console
+$ notefind search tomato --all-lines
+Garden Plan.md:7: Raised beds go along the south fence. Tomatoes need full sun, so they get
+Garden Plan.md:8: the bed nearest the shed. Basil goes next to the tomatoes. #companion-planting
+Compost.md:13: Tomato vines go in the green pile, but not if they had blight.
+Seed Order.md:9: | Cherry tomato   | 2       |
+daily/2026-05-02.md:3: Planted the cherry tomatoes and basil today. Covered the lettuce
+projects/watering.md:3: Water tomatoes deeply twice a week; basil likes lighter, more frequent
+5 notes matched (6 lines)
+```
+
+A filter-only search (`tag:soil --all-lines`) still shows one line per note.
+It works with `--fuzzy`, `-w` and `--regex`. In `--json` output the query gets
+`"all_lines": true` and each result a `"lines"` list (`line` and `snippet`
+for each matching line); `line` and `snippet` keep pointing at the first one:
+
+```console
+$ notefind search "full sun" basil --all-lines --json
+{
+  "query": {
+    "terms": [
+      "basil"
+    ],
+    "phrases": [
+      "full sun"
+    ],
+    "exclude": [],
+    "tags": [],
+    "exclude_tags": [],
+    "fields": [],
+    "exclude_fields": [],
+    "all_lines": true
+  },
+  "total": 1,
+  "results": [
+    {
+      "path": "Garden Plan.md",
+      "line": 7,
+      "matches": 2,
+      "snippet": "Raised beds go along the south fence. Tomatoes need full sun, so they get",
+      "lines": [
+        {
+          "line": 7,
+          "snippet": "Raised beds go along the south fence. Tomatoes need full sun, so they get"
+        },
+        {
+          "line": 8,
+          "snippet": "the bed nearest the shed. Basil goes next to the tomatoes. #companion-planting"
+        }
+      ]
+    }
+  ]
+}
+```
 
 #### Options and exclusions
 
