@@ -1,4 +1,4 @@
-"""Command-line interface: notefind search | tags | links | backlinks | orphans | watch."""
+"""Command-line interface: notefind search | tags | links | backlinks | orphans | report | watch."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from .config import ConfigError, command_defaults, load_config
 from .fix import fix_links
 from .linkcheck import find_broken_links
 from .parse import extract_tags
+from .report import render_report
 from .scan import load_notes, walk_files
 from . import watch as watching
 from .search import (
@@ -198,6 +199,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_folder(p)
     p.add_argument("--json", action="store_true", help="print JSON")
+
+    p = sub.add_parser(
+        "report",
+        help="write a single-file HTML report",
+        description=(
+            "Write one self-contained HTML page with the broken links (with "
+            "suggestions), tags with note counts and orphan notes. Prints to "
+            "stdout unless -o is given."
+        ),
+    )
+    _add_folder(p)
+    p.add_argument("--html", action="store_true", help="HTML output (currently the only format)")
+    p.add_argument("-o", "--output", metavar="FILE", help="write the report to FILE")
 
     p = sub.add_parser(
         "watch",
@@ -419,7 +433,28 @@ def _cmd_orphans(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
-_NOT_CONFIGURABLE = {"help", "folder", "fix", "dry_run", "no_config"}
+def _cmd_report(args: argparse.Namespace, root: Path) -> int:
+    if not args.html:
+        print("notefind: report needs --html", file=sys.stderr)
+        return 2
+    files = walk_files(root, use_ignore=not args.no_ignore)
+    notes = load_notes(root, files, jobs=args.jobs)
+    broken, checked = find_broken_links(root, notes, files, suggest=True)
+    page = render_report(notes, broken, checked)
+    if args.output:
+        try:
+            Path(args.output).write_text(page, encoding="utf-8", newline="\n")
+        except OSError as exc:
+            print(f"notefind: can't write {args.output}: {exc.strerror or exc}", file=sys.stderr)
+            return 2
+        print(f"wrote {args.output} ({len(notes)} notes, {len(broken)} broken links)",
+              file=sys.stderr)
+    else:
+        sys.stdout.write(page)
+    return 0
+
+
+_NOT_CONFIGURABLE = {"help", "folder", "fix", "dry_run", "no_config", "output", "html"}
 
 
 def _checker(action: argparse.Action):
@@ -532,4 +567,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_backlinks(args, root)
     if args.command == "orphans":
         return _cmd_orphans(args, root)
+    if args.command == "report":
+        return _cmd_report(args, root)
     return _cmd_links(args, root)

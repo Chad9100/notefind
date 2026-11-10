@@ -17,6 +17,7 @@ plain directories. It does these things:
   did-you-mean suggestions and `--fix` to apply the unambiguous ones;
 - **backlinks**: list the notes that link to a given note;
 - **orphans**: list notes that nothing links to;
+- **report**: write a single-file HTML page with broken links, tags and orphans;
 - **watch**: re-run any of the above whenever a note changes.
 
 There is no index and no database. Every run scans the folder, skipping hidden
@@ -598,6 +599,21 @@ Notes that no *other* note links to: useful for spotting forgotten notes. It
 always exits with 0, since an orphan isn't an error (daily notes and index pages
 are often orphans on purpose). `--json` prints `{"total_notes": 6, "orphans": [...]}`.
 
+### report
+
+```console
+$ notefind report --html -o report.html
+wrote report.html (6 notes, 4 broken links)
+```
+
+Writes one self-contained HTML page (inline styles, no scripts, light and dark
+mode) with a summary line, the broken links with did-you-mean suggestions,
+every tag with its note count, and the orphan notes. Without `-o` the page is
+printed to stdout. `--html` is required for now, as the only format. It exits
+with 0 whenever the report was written and 2 when it can't be (for example,
+an unwritable `-o` path). `-C`, `-j`, `--no-config` and `--no-ignore` work as
+for the other commands.
+
 ### watch
 
 ```
@@ -754,6 +770,7 @@ src/notefind/
   linkcheck.py  resolving wiki and Markdown links and their anchors
   suggest.py    closest note, file or heading for links --suggest
   graph.py      backlinks and orphans
+  report.py     the HTML page for the report command
   watch.py      polling snapshots for the watch command
   cli.py        argparse front end
 tests/          pytest suite using throwaway tmp_path note folders

@@ -48,7 +48,7 @@ Estimates are rough working hours for one person, including tests and docs.
 
 ## v0.6 - reports and watching (about 6 h)
 
-- [ ] `report --html`: single-file HTML page with tags, broken links and
+- [x] `report --html`: single-file HTML page with tags, broken links and
       orphans (3 h)
 - [x] `watch`: re-run `links` (or any command) when notes change, polling only,
       no dependencies (3 h)
