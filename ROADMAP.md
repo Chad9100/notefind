@@ -57,7 +57,7 @@ Estimates are rough working hours for one person, including tests and docs.
 
 - [x] Extra ignore patterns in a `.notefindignore` file, with `--no-ignore`
       (1 h; split out of the config file item)
-- [ ] Config file (`.notefind.toml`) for command defaults such as `--limit`
+- [x] Config file (`.notefind.toml`) for command defaults such as `--limit`
       and `--color`; needs a small TOML fallback for Python 3.10 (1 h)
 - [ ] Publish to PyPI with trusted publishing from a tagged release (1 h)
 - [ ] Stable, documented JSON schema; changelog (1 h)

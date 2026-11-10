@@ -12,6 +12,7 @@ from typing import Sequence, TextIO
 
 from . import __version__
 from .graph import NoteResolver, backlinks, link_edges, orphans
+from .config import ConfigError, command_defaults, load_config
 from .fix import fix_links
 from .linkcheck import find_broken_links
 from .parse import extract_tags
@@ -73,6 +74,10 @@ def _add_folder(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "-j", "--jobs", type=_positive_int, default=None, metavar="N",
         help="threads for reading notes (default: automatic; 1 = sequential)",
+    )
+    parser.add_argument(
+        "--no-config", action="store_true",
+        help="don't read defaults from the folder's .notefind.toml",
     )
     parser.add_argument(
         "--no-ignore", action="store_true",
@@ -414,11 +419,63 @@ def _cmd_orphans(args: argparse.Namespace, root: Path) -> int:
     return 0
 
 
+_NOT_CONFIGURABLE = {"help", "folder", "fix", "dry_run", "no_config"}
+
+
+def _checker(action: argparse.Action):
+    """Build a function that validates a config value for one option."""
+    if isinstance(action, argparse._StoreTrueAction):
+        def check(value):
+            if not isinstance(value, bool):
+                raise ValueError("expected true or false")
+            return value
+    elif action.choices:
+        def check(value):
+            if value not in action.choices:
+                raise ValueError("expected one of " + ", ".join(action.choices))
+            return value
+    else:
+        def check(value):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise ValueError("expected a whole number")
+            try:
+                return action.type(str(value))
+            except argparse.ArgumentTypeError as exc:
+                raise ValueError(str(exc)) from None
+    return check
+
+
+def _config_checks(parser: argparse.ArgumentParser) -> dict[str, dict]:
+    sub_action = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    checks: dict[str, dict] = {}
+    for name, sub in sub_action.choices.items():
+        if name == "watch":
+            continue
+        checks[name] = {
+            a.dest: _checker(a)
+            for a in sub._actions
+            if a.option_strings and a.dest not in _NOT_CONFIGURABLE
+        }
+    return checks
+
+
 def _parse(argv: list[str]) -> argparse.Namespace:
     if argv and argv[0] == "search":
         opts, terms = _split_search_args(argv[1:])
         argv = ["search", *opts, "--", *terms]
-    return build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.command == "watch" or args.no_config:
+        return args
+    root = Path(args.folder)
+    config = load_config(root) if root.is_dir() else None
+    if config:
+        sub_action = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+        defaults = command_defaults(config, _config_checks(parser))
+        for name, values in defaults.items():
+            sub_action.choices[name].set_defaults(**values)
+        args = parser.parse_args(argv)  # again, now with the config's defaults
+    return args
 
 
 def _cmd_watch(args: argparse.Namespace) -> int:
@@ -456,9 +513,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         except (AttributeError, ValueError):
             pass
     argv = list(sys.argv[1:] if argv is None else argv)
-    args = _parse(argv)
-    if args.command == "watch":
-        return _cmd_watch(args)
+    try:
+        args = _parse(argv)
+        if args.command == "watch":
+            return _cmd_watch(args)
+    except ConfigError as exc:
+        print(f"notefind: {exc}", file=sys.stderr)
+        return 2
     root = Path(args.folder)
     if not root.is_dir():
         print(f"notefind: not a folder: {args.folder}", file=sys.stderr)

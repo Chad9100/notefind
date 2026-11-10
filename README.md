@@ -666,6 +666,58 @@ One pattern per line; blank lines and lines starting with `#` are skipped.
 negation. Links pointing *into* an ignored folder count as broken, since its
 notes are out of scope. `--no-ignore` on any command reads everything again.
 
+### Defaults: `.notefind.toml`
+
+Put a `.notefind.toml` file in the notes folder to set defaults for options
+you would otherwise type every time. With this file next to three notes that
+contain "tomato":
+
+```toml
+# defaults for this vault
+limit = 2
+color = "never"
+```
+
+```console
+$ notefind search tomato
+a.md:1: tomato soup
+b.md:1: tomato salad
+3 notes matched, showing 2
+$ notefind search tomato --limit 10
+a.md:1: tomato soup
+b.md:1: tomato salad
+c.md:1: tomato pie
+3 notes matched
+$ notefind search tomato --no-config
+a.md:1: tomato soup
+b.md:1: tomato salad
+c.md:1: tomato pie
+3 notes matched
+```
+
+Top-level keys apply to every command that has that option (`limit` only
+affects `search`). A table named after a command overrides them for that
+command:
+
+```toml
+jobs = 4
+
+[search]
+limit = 50
+fuzzy = true
+```
+
+Keys are option names with `_` for `-`: `limit`, `color`, `jobs`, `json`,
+`fuzzy`, `word`, `regex`, `all_lines`, `no_anchors`, `suggest`, `no_ignore`.
+Options on the command line win over the file, `--no-config` skips it, and
+a switch set to `true` in the file can't be turned off from the command line
+(use `--no-config`). `--fix`, `--dry-run` and `-C` are never read from the
+file. An unknown key or a bad value stops the command with exit code 2.
+The file is read from the notes folder (`-C`), not from the current
+directory. TOML is read with `tomllib` on Python 3.11+ and with a small
+built-in reader on 3.10, which understands tables and string, number and
+true/false values.
+
 ### Files
 
 Notes are `*.md` and `*.markdown` files. They are read as UTF-8 (a BOM is
